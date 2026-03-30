@@ -1,5 +1,5 @@
 // client/src/App.tsx
-import { Switch, Route } from "wouter";
+import { Routes, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -32,21 +32,26 @@ function Router() {
     );
   }
 
-  // If user is not logged in, always show login page
+  // Unauthenticated users
   if (!user) {
-    return <Login />;
+    return (
+      <Routes>
+        <Route path="/login" component={Login} />
+        <Route path="*" component={Login} />
+      </Routes>
+    );
   }
 
-  // User is logged in, render main app layout with sidebar
+  // Authenticated users
   return (
     <Layout>
-      <Switch>
+      <Routes>
         <Route path="/" component={Dashboard} />
         <Route path="/leads" component={Leads} />
         <Route path="/templates" component={Templates} />
         <Route path="/users" component={Users} />
-        <Route component={NotFound} />
-      </Switch>
+        <Route path="*" component={NotFound} />
+      </Routes>
     </Layout>
   );
 }
