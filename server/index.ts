@@ -1,4 +1,14 @@
 // server/index.ts
+
+// --- Global error handlers ---
+process.on("unhandledRejection", (reason) => {
+  console.error("❌ Unhandled Promise Rejection:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err);
+});
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
