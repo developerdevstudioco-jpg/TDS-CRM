@@ -4,7 +4,8 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import "dotenv/config";
-import path from "path";
+import path, { dirname, join } from "path";
+import { fileURLToPath } from "url";
 
 // --- Drizzle imports ---
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -14,6 +15,10 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 const app = express();
 const httpServer = createServer(app);
+
+// --- ES module alternative to __dirname ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 declare module "http" {
   interface IncomingMessage {
@@ -92,7 +97,7 @@ app.use((req, res, next) => {
   // REAL: run migrations
   try {
     console.log("🔄 Running migrations...");
-    await migrate(db, { migrationsFolder: path.join(__dirname, "../migrations") });
+    await migrate(db, { migrationsFolder: join(__dirname, "../migrations") });
     console.log("✅ Migrations complete");
   } catch (err) {
     console.error("❌ Migration failed:", err);
