@@ -1,14 +1,20 @@
 // server/index.ts
 
 import fs from "fs";
+import path from "path";
 
-// --- 1️⃣ Log everything to a file for Render ---
-const logFile = fs.createWriteStream("/tmp/render-debug.log", { flags: "a" });
+// --- 1️⃣ Setup log file inside the existing "uploads" folder ---
+const logPath = path.join(process.cwd(), "uploads", "server.log");
+fs.mkdirSync(path.dirname(logPath), { recursive: true });
+const logFile = fs.createWriteStream(logPath, { flags: "a" });
+
+// Override console.log and console.error to write to file
 console.log = (...args: any[]) => logFile.write(args.join(" ") + "\n");
 console.error = (...args: any[]) => logFile.write(args.join(" ") + "\n");
 
-// --- 2️⃣ Global startup logging and error handlers ---
 console.log("🚀 Starting server...");
+
+// --- 2️⃣ Global error handlers ---
 process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled Promise Rejection:", reason);
 });
@@ -21,7 +27,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import "dotenv/config";
-import path, { dirname, join } from "path";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 // --- Drizzle imports ---
@@ -101,7 +107,7 @@ app.use((req, res, next) => {
 
     const db = drizzle(pool, { schema });
 
-    // Test connection
+    // Test DB connection
     try {
       console.log("🔄 Initializing DB...");
       await pool.query("SELECT 1");
