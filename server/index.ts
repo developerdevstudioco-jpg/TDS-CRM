@@ -109,13 +109,13 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
     const migrationsFolder = join(__dirname, "../migrations");
 
     if (fs.existsSync(migrationsFolder)) {
-      // --- 8c1. Ensure meta/_journal.json exists ---
+      // --- 8c1. Ensure meta/_journal.json exists in correct format ---
       const metaFolder = join(migrationsFolder, "meta");
       const journalFile = join(metaFolder, "_journal.json");
       if (!fs.existsSync(metaFolder)) fs.mkdirSync(metaFolder, { recursive: true });
       if (!fs.existsSync(journalFile)) {
-        fs.writeFileSync(journalFile, "[]");
-        logSync(`ℹ _journal.json created at ${journalFile}`);
+        fs.writeFileSync(journalFile, JSON.stringify({ entries: [] }, null, 2));
+        logSync(`ℹ _journal.json created at ${journalFile} with correct format`);
       }
 
       try {
