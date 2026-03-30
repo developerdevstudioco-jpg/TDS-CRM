@@ -107,7 +107,17 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
     // --- 8c. Run migrations ---
     const migrationsFolder = join(__dirname, "../migrations");
+
     if (fs.existsSync(migrationsFolder)) {
+      // --- 8c1. Ensure meta/_journal.json exists ---
+      const metaFolder = join(migrationsFolder, "meta");
+      const journalFile = join(metaFolder, "_journal.json");
+      if (!fs.existsSync(metaFolder)) fs.mkdirSync(metaFolder, { recursive: true });
+      if (!fs.existsSync(journalFile)) {
+        fs.writeFileSync(journalFile, "[]");
+        logSync(`ℹ _journal.json created at ${journalFile}`);
+      }
+
       try {
         logSync("🔄 Running migrations...");
         await migrate(db, {
@@ -133,7 +143,6 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
       logSync("⚠ registerRoutes failed, using dummy routes");
       await dummyRegisterRoutes(httpServer, app);
     }
-
   } catch (err: any) {
     logSync("❌ Fatal startup error: " + (err.message || err));
     logSync(err.stack || "");
