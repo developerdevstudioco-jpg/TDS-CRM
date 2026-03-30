@@ -1,3 +1,4 @@
+// client/src/App.tsx
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -22,6 +23,7 @@ import Users from "@/pages/users";
 function Router() {
   const { user, isLoading } = useAuth();
 
+  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -30,12 +32,12 @@ function Router() {
     );
   }
 
-  // Not authenticated - show login
+  // If user is not logged in, always show login page
   if (!user) {
     return <Login />;
   }
 
-  // Authenticated - show app
+  // User is logged in, render main app layout with sidebar
   return (
     <Layout>
       <Switch>
