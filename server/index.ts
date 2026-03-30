@@ -1,6 +1,9 @@
 // server/index.ts
 
-// --- Global error handlers ---
+// --- 1️⃣ Global startup logging ---
+console.log("🚀 Starting server...");
+
+// --- 2️⃣ Global error handlers ---
 process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled Promise Rejection:", reason);
 });
