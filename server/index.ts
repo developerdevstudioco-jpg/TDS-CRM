@@ -13,12 +13,10 @@ import * as schema from "../shared/schema";
 
 // --- 1️⃣ Synchronous logging setup ---
 const logPath = path.join(process.cwd(), "uploads", "server.log");
-
 function logSync(message: string) {
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`);
 }
-
 logSync("🚀 Starting server...");
 
 // Global error handlers
@@ -36,7 +34,7 @@ const httpServer = createServer(app);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// --- Logger function ---
+// --- 4️⃣ Logger function ---
 function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
@@ -47,7 +45,7 @@ function log(message: string, source = "express") {
   logSync(`${formattedTime} [${source}] ${message}`);
 }
 
-// --- Request logging middleware ---
+// --- 5️⃣ Request logging middleware ---
 app.use((req, res, next) => {
   const start = Date.now();
   const pathReq = req.path;
@@ -71,7 +69,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- Temporary route to download logs ---
+// --- 6️⃣ Temporary route to download logs ---
 app.get("/server-log", (_req, res) => {
   if (fs.existsSync(logPath)) {
     res.download(logPath, "server.log");
@@ -80,21 +78,23 @@ app.get("/server-log", (_req, res) => {
   }
 });
 
-// --- Async startup ---
+// --- 7️⃣ Minimal health check ---
+app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+// --- 8️⃣ Async startup ---
 (async () => {
   try {
-    // --- 1. Check DATABASE_URL ---
+    // --- 8a. Check DATABASE_URL ---
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) {
       logSync("❌ DATABASE_URL not set!");
-      process.exit(1);
+      return;
     }
 
-    // --- 2. Setup Drizzle + Postgres ---
+    // --- 8b. Setup Drizzle + Postgres ---
     const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
     const db = drizzle(pool, { schema });
 
-    // Test DB connection
     try {
       logSync("🔄 Testing DB connection...");
       await pool.query("SELECT 1");
@@ -102,10 +102,10 @@ app.get("/server-log", (_req, res) => {
     } catch (err: any) {
       logSync("❌ DB connection failed: " + (err.message || err));
       logSync(err.stack || "");
-      process.exit(1);
+      return;
     }
 
-    // --- 3. Run migrations if folder exists ---
+    // --- 8c. Run migrations ---
     const migrationsFolder = join(__dirname, "../migrations");
     if (fs.existsSync(migrationsFolder)) {
       try {
@@ -119,13 +119,12 @@ app.get("/server-log", (_req, res) => {
       } catch (err: any) {
         logSync("❌ Migration failed: " + (err.message || err));
         logSync(err.stack || "");
-        process.exit(1);
       }
     } else {
       logSync("⚠ Migrations folder not found, skipping migrations");
     }
 
-    // --- 4. Register routes ---
+    // --- 8d. Register routes ---
     const dummyRegisterRoutes = async (_httpServer: any, _app: any) => {};
     try {
       const { registerRoutes } = await import("./routes");
@@ -135,18 +134,14 @@ app.get("/server-log", (_req, res) => {
       await dummyRegisterRoutes(httpServer, app);
     }
 
-    // --- 5. Minimal health check ---
-    app.get("/health", (_req, res) => res.json({ status: "ok" }));
-
-    // --- 6. Start server ---
-    const port = parseInt(process.env.PORT || "5000", 10);
-    httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
-      log(`🚀 Server running on port ${port}`)
-    );
-
   } catch (err: any) {
     logSync("❌ Fatal startup error: " + (err.message || err));
     logSync(err.stack || "");
-    process.exit(1);
   }
 })();
+
+// --- 9️⃣ Start server immediately ---
+const port = parseInt(process.env.PORT || "5000", 10);
+httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
+  logSync(`🚀 Server listening on port ${port}`)
+);
