@@ -1,6 +1,15 @@
-// server/index.ts
+// server/intex.ts
 import fs from "fs";
 import path from "path";
+import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
+import "dotenv/config";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import * as schema from "../shared/schema";
 
 // --- 1️⃣ Synchronous logging setup ---
 const logPath = path.join(process.cwd(), "uploads", "server.log");
@@ -16,25 +25,11 @@ logSync("🚀 Starting server...");
 process.on("unhandledRejection", (reason) => logSync("❌ Unhandled Rejection: " + reason));
 process.on("uncaughtException", (err) => logSync("❌ Uncaught Exception: " + (err.stack || err)));
 
-// --- 2️⃣ Imports ---
-import express, { type Request, Response, NextFunction } from "express";
-import { createServer } from "http";
-import "dotenv/config";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-import * as schema from "../shared/schema";
-
-// Optional: fallback if registerRoutes fails
-const dummyRegisterRoutes = async (_httpServer: any, _app: any) => {};
-
-// --- 3️⃣ ES module __dirname alternative ---
+// --- 2️⃣ ES module __dirname alternative ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// --- 4️⃣ Express setup ---
+// --- 3️⃣ Express setup ---
 const app = express();
 const httpServer = createServer(app);
 
@@ -76,17 +71,26 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- 5️⃣ Async startup ---
+// --- Temporary route to download logs ---
+app.get("/server-log", (_req, res) => {
+  if (fs.existsSync(logPath)) {
+    res.download(logPath, "server.log");
+  } else {
+    res.status(404).send("Log file not found");
+  }
+});
+
+// --- Async startup ---
 (async () => {
   try {
-    // --- 5a. Check DATABASE_URL ---
+    // --- 1. Check DATABASE_URL ---
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) {
       logSync("❌ DATABASE_URL not set!");
       process.exit(1);
     }
 
-    // --- 5b. Setup Drizzle + Postgres ---
+    // --- 2. Setup Drizzle + Postgres ---
     const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
     const db = drizzle(pool, { schema });
 
@@ -101,7 +105,7 @@ app.use((req, res, next) => {
       process.exit(1);
     }
 
-    // --- 5c. Run migrations if folder exists ---
+    // --- 3. Run migrations if folder exists ---
     const migrationsFolder = join(__dirname, "../migrations");
     if (fs.existsSync(migrationsFolder)) {
       try {
@@ -121,7 +125,8 @@ app.use((req, res, next) => {
       logSync("⚠ Migrations folder not found, skipping migrations");
     }
 
-    // --- 5d. Register routes ---
+    // --- 4. Register routes ---
+    const dummyRegisterRoutes = async (_httpServer: any, _app: any) => {};
     try {
       const { registerRoutes } = await import("./routes");
       await registerRoutes(httpServer, app);
@@ -130,10 +135,10 @@ app.use((req, res, next) => {
       await dummyRegisterRoutes(httpServer, app);
     }
 
-    // --- 5e. Minimal health check ---
+    // --- 5. Minimal health check ---
     app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-    // --- 5f. Start server ---
+    // --- 6. Start server ---
     const port = parseInt(process.env.PORT || "5000", 10);
     httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
       log(`🚀 Server running on port ${port}`)
