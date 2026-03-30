@@ -1,14 +1,16 @@
+// server/index.ts
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import "dotenv/config";
+import path from "path";
 
 // --- Drizzle imports ---
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "../shared/schema";
-import { migrate } from "drizzle-orm/node-postgres/migrator"; // only if using migrations
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 const app = express();
 const httpServer = createServer(app);
@@ -72,32 +74,32 @@ app.use((req, res, next) => {
   // --- 1️⃣ Setup Drizzle + Postgres ---
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }, // required for some managed DBs
+    ssl: { rejectUnauthorized: false }, // required for managed DBs like Render Postgres
   });
 
   const db = drizzle(pool, { schema });
 
-  // TEMP fix: test connection
+  // TEMP: test connection
   try {
     console.log("🔄 Initializing DB...");
     await pool.query("SELECT 1");
     console.log("✅ DB connected");
   } catch (err) {
     console.error("❌ DB connection failed:", err);
-    process.exit(1); // fail fast if DB cannot connect
+    process.exit(1); // fail fast
   }
 
-  // REAL fix: run migrations
+  // REAL: run migrations
   try {
     console.log("🔄 Running migrations...");
-    await migrate(db, { migrationsFolder: "./migrations" });
+    await migrate(db, { migrationsFolder: path.join(__dirname, "../migrations") });
     console.log("✅ Migrations complete");
   } catch (err) {
     console.error("❌ Migration failed:", err);
     process.exit(1);
   }
 
-  // --- 2️⃣ Register routes ---
+  // --- 2️⃣ Register API routes ---
   await registerRoutes(httpServer, app);
 
   // --- 3️⃣ Error handler ---
@@ -114,12 +116,12 @@ app.use((req, res, next) => {
     return res.status(status).json({ message });
   });
 
-  // --- 4️⃣ Serve static files or setup Vite ---
+  // --- 4️⃣ Serve static files or dev Vite ---
   if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
+    serveStatic(app); // serves frontend from dist/public
   } else {
     const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
+    await setupVite(httpServer, app); // dev HMR
   }
 
   // --- 5️⃣ Start server ---
