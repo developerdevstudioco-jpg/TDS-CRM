@@ -1,7 +1,7 @@
 // server/index.ts
 import fs from "fs";
 import path, { dirname, join } from "path";
-import express, { type Request, Response } from "express";
+import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import "dotenv/config";
 import { fileURLToPath } from "url";
@@ -65,14 +65,6 @@ app.get("/server-log", (_req, res) => {
 app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-// --- Serve React frontend ---
-const clientBuildPath = join(__dirname, "../client/dist/public");
-app.use(express.static(clientBuildPath));
-// SPA routing fallback (everything except /api goes to index.html)
-app.get(/^\/(?!api).*/, (_req, res) => {
-  res.sendFile(path.join(clientBuildPath, "index.html"));
-});
-
 // --- Async startup ---
 (async () => {
   try {
@@ -118,7 +110,7 @@ app.get(/^\/(?!api).*/, (_req, res) => {
       log("⚠ Migrations folder not found, skipping migrations");
     }
 
-    // --- Register routes ---
+    // --- Register backend API routes ---
     try {
       const { registerRoutes } = await import("./routes");
       await registerRoutes(httpServer, app);
@@ -126,6 +118,15 @@ app.get(/^\/(?!api).*/, (_req, res) => {
     } catch (err) {
       log("⚠ registerRoutes failed, using dummy routes: " + err);
     }
+
+    // --- Serve React frontend ---
+    const clientDistPath = join(__dirname, "../client/dist");
+    app.use(express.static(clientDistPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(join(clientDistPath, "index.html"));
+    });
+    log(`ℹ React frontend served from ${clientDistPath}`);
+    
   } catch (err: any) {
     log("❌ Fatal startup error: " + (err.message || err));
   }
