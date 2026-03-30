@@ -1,156 +1,130 @@
-// server/intex.ts
+// server/index.ts
 import fs from "fs";
-import path from "path";
+import path, { dirname, join } from "path";
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import "dotenv/config";
-import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import * as schema from "../shared/schema";
 
-// --- 1️⃣ Synchronous logging setup ---
-const logPath = path.join(process.cwd(), "uploads", "server.log");
-function logSync(message: string) {
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`);
-}
-logSync("🚀 Starting server...");
-
-// Global error handlers
-process.on("unhandledRejection", (reason) => logSync("❌ Unhandled Rejection: " + reason));
-process.on("uncaughtException", (err) => logSync("❌ Uncaught Exception: " + (err.stack || err)));
-
-// --- 2️⃣ ES module __dirname alternative ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// --- 3️⃣ Express setup ---
+// --- Logging setup ---
+const logFolder = join(process.cwd(), "uploads");
+const logFilePath = join(logFolder, "server.log");
+if (!fs.existsSync(logFolder)) fs.mkdirSync(logFolder, { recursive: true });
+function log(message: string, source = "server") {
+  const timestamp = new Date().toISOString();
+  const line = `[${timestamp}] [${source}] ${message}`;
+  console.log(line);
+  fs.appendFileSync(logFilePath, line + "\n");
+}
+
+// Global error handlers
+process.on("unhandledRejection", (reason) => log("❌ Unhandled Rejection: " + reason));
+process.on("uncaughtException", (err) => log("❌ Uncaught Exception: " + (err.stack || err)));
+
+// --- Express setup ---
 const app = express();
 const httpServer = createServer(app);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// --- 4️⃣ Logger function ---
-function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-  logSync(`${formattedTime} [${source}] ${message}`);
-}
-
-// --- 5️⃣ Request logging middleware ---
+// --- Request logging middleware ---
 app.use((req, res, next) => {
   const start = Date.now();
   const pathReq = req.path;
   let capturedJsonResponse: Record<string, any> | undefined;
-
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
     capturedJsonResponse = bodyJson;
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
-
   res.on("finish", () => {
-    const duration = Date.now() - start;
     if (pathReq.startsWith("/api")) {
-      let logLine = `${req.method} ${pathReq} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      log(logLine);
+      let line = `${req.method} ${pathReq} ${res.statusCode} in ${Date.now() - start}ms`;
+      if (capturedJsonResponse) line += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      log(line, "express");
     }
   });
-
   next();
 });
 
-// --- 6️⃣ Temporary route to download logs ---
+// --- Temporary route to download logs ---
 app.get("/server-log", (_req, res) => {
-  if (fs.existsSync(logPath)) {
-    res.download(logPath, "server.log");
-  } else {
-    res.status(404).send("Log file not found");
-  }
+  if (fs.existsSync(logFilePath)) res.download(logFilePath, "server.log");
+  else res.status(404).send("Log file not found");
 });
 
-// --- 7️⃣ Minimal health check ---
+// --- Health check ---
+app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-// --- 8️⃣ Async startup ---
+// --- Async startup ---
 (async () => {
   try {
-    // --- 8a. Check DATABASE_URL ---
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) {
-      logSync("❌ DATABASE_URL not set!");
+      log("❌ DATABASE_URL not set!");
       return;
     }
 
-    // --- 8b. Setup Drizzle + Postgres ---
     const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
     const db = drizzle(pool, { schema });
 
     try {
-      logSync("🔄 Testing DB connection...");
+      log("🔄 Testing DB connection...");
       await pool.query("SELECT 1");
-      logSync("✅ DB connected");
+      log("✅ DB connected");
     } catch (err: any) {
-      logSync("❌ DB connection failed: " + (err.message || err));
-      logSync(err.stack || "");
+      log("❌ DB connection failed: " + (err.message || err));
       return;
     }
 
-    // --- 8c. Run migrations ---
+    // --- Migrations ---
     const migrationsFolder = join(__dirname, "../migrations");
-
     if (fs.existsSync(migrationsFolder)) {
-      // --- 8c1. Ensure meta/_journal.json exists in correct format ---
       const metaFolder = join(migrationsFolder, "meta");
       const journalFile = join(metaFolder, "_journal.json");
       if (!fs.existsSync(metaFolder)) fs.mkdirSync(metaFolder, { recursive: true });
-      if (!fs.existsSync(journalFile)) {
-        fs.writeFileSync(journalFile, JSON.stringify({ entries: [] }, null, 2));
-        logSync(`ℹ _journal.json created at ${journalFile} with correct format`);
-      }
+      if (!fs.existsSync(journalFile)) fs.writeFileSync(journalFile, JSON.stringify({ entries: [] }, null, 2));
+      log(`ℹ _journal.json ensured at ${journalFile}`);
 
       try {
-        logSync("🔄 Running migrations...");
+        log("🔄 Running migrations...");
         await migrate(db, {
           migrationsFolder,
-          onMigrationStart: (name) => logSync(`➡ Applying migration: ${name}`),
-          onMigrationComplete: (name) => logSync(`✅ Migration applied: ${name}`),
+          onMigrationStart: (name) => log(`➡ Applying migration: ${name}`),
+          onMigrationComplete: (name) => log(`✅ Migration applied: ${name}`),
         });
-        logSync("✅ All migrations complete");
+        log("✅ All migrations complete");
       } catch (err: any) {
-        logSync("❌ Migration failed: " + (err.message || err));
-        logSync(err.stack || "");
+        log("❌ Migration failed: " + (err.message || err));
       }
     } else {
-      logSync("⚠ Migrations folder not found, skipping migrations");
+      log("⚠ Migrations folder not found, skipping migrations");
     }
 
-    // --- 8d. Register routes ---
-    const dummyRegisterRoutes = async (_httpServer: any, _app: any) => {};
+    // --- Register routes ---
     try {
       const { registerRoutes } = await import("./routes");
       await registerRoutes(httpServer, app);
+      log("✅ Routes registered");
     } catch (err) {
-      logSync("⚠ registerRoutes failed, using dummy routes");
-      await dummyRegisterRoutes(httpServer, app);
+      log("⚠ registerRoutes failed, using dummy routes: " + err);
     }
   } catch (err: any) {
-    logSync("❌ Fatal startup error: " + (err.message || err));
-    logSync(err.stack || "");
+    log("❌ Fatal startup error: " + (err.message || err));
   }
 })();
 
-// --- 9️⃣ Start server immediately ---
+// --- Start server ---
 const port = parseInt(process.env.PORT || "5000", 10);
 httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
-  logSync(`🚀 Server listening on port ${port}`)
+  log(`🚀 Server listening on port ${port}`)
 );
