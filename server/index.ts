@@ -1,7 +1,7 @@
 // server/index.ts
 import fs from "fs";
 import path, { dirname, join } from "path";
-import express, { type Request, Response, NextFunction } from "express";
+import express, { type Request, Response } from "express";
 import { createServer } from "http";
 import "dotenv/config";
 import { fileURLToPath } from "url";
@@ -64,6 +64,14 @@ app.get("/server-log", (_req, res) => {
 // --- Health check ---
 app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+// --- Serve React frontend ---
+const clientBuildPath = join(__dirname, "../client/dist/public");
+app.use(express.static(clientBuildPath));
+// SPA routing fallback (everything except /api goes to index.html)
+app.get(/^\/(?!api).*/, (_req, res) => {
+  res.sendFile(path.join(clientBuildPath, "index.html"));
+});
 
 // --- Async startup ---
 (async () => {
