@@ -1,0 +1,11 @@
+[2026-03-30T22:14:21.625Z] [server] 🔄 Testing DB connection...
+[2026-03-30T22:14:21.636Z] [server] ❌ Uncaught Exception: Error: listen ENOTSUP: operation not supported on socket 0.0.0.0:5000
+    at Server.setupListenHandle [as _listen2] (node:net:1926:21)
+    at listenInCluster (node:net:2005:12)
+    at node:net:2214:7
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+[2026-03-30T22:14:22.369Z] [server] ✅ DB connected
+[2026-03-30T22:14:22.370Z] [server] ℹ _journal.json ensured at C:\Users\rgramesh\Downloads\New folder (15)\TDS-CRM-main\migrations\meta\_journal.json
+[2026-03-30T22:14:22.371Z] [server] 🔄 Running migrations...
+[2026-03-30T22:14:22.607Z] [server] ✅ All migrations complete
+[2026-03-30T22:14:22.920Z] [server] ⚠ registerRoutes failed, using dummy routes: Error: read ECONNRESET
