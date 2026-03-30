@@ -76,63 +76,71 @@ app.use((req, res, next) => {
 
 // --- Async IIFE for setup ---
 (async () => {
-  // --- 1️⃣ Setup Drizzle + Postgres ---
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }, // required for managed DBs like Render Postgres
-  });
-
-  const db = drizzle(pool, { schema });
-
-  // TEMP: test connection
   try {
-    console.log("🔄 Initializing DB...");
-    await pool.query("SELECT 1");
-    console.log("✅ DB connected");
-  } catch (err) {
-    console.error("❌ DB connection failed:", err);
-    process.exit(1); // fail fast
-  }
+    // --- 1️⃣ Setup Drizzle + Postgres ---
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
 
-  // REAL: run migrations
-  try {
-    console.log("🔄 Running migrations...");
-    await migrate(db, { migrationsFolder: join(__dirname, "../migrations") });
-    console.log("✅ Migrations complete");
-  } catch (err) {
-    console.error("❌ Migration failed:", err);
-    process.exit(1);
-  }
+    const db = drizzle(pool, { schema });
 
-  // --- 2️⃣ Register API routes ---
-  await registerRoutes(httpServer, app);
-
-  // --- 3️⃣ Error handler ---
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("Internal Server Error:", err);
-
-    if (res.headersSent) {
-      return next(err);
+    // TEMP: test connection
+    try {
+      console.log("🔄 Initializing DB...");
+      await pool.query("SELECT 1");
+      console.log("✅ DB connected");
+    } catch (err: any) {
+      console.error("❌ DB connection failed:", err.message || err);
+      console.error(err.stack || "");
+      process.exit(1);
     }
 
-    return res.status(status).json({ message });
-  });
+    // REAL: run migrations
+    try {
+      console.log("🔄 Running migrations...");
+      await migrate(db, { migrationsFolder: join(__dirname, "../migrations") });
+      console.log("✅ Migrations complete");
+    } catch (err: any) {
+      console.error("❌ Migration failed:", err.message || err);
+      console.error(err.stack || "");
+      process.exit(1);
+    }
 
-  // --- 4️⃣ Serve static files or dev Vite ---
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app); // serves frontend from dist/public
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app); // dev HMR
+    // --- 2️⃣ Register API routes ---
+    await registerRoutes(httpServer, app);
+
+    // --- 3️⃣ Error handler ---
+    app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+
+      console.error("Internal Server Error:", err);
+
+      if (res.headersSent) {
+        return next(err);
+      }
+
+      return res.status(status).json({ message });
+    });
+
+    // --- 4️⃣ Serve static files or dev Vite ---
+    if (process.env.NODE_ENV === "production") {
+      serveStatic(app);
+    } else {
+      const { setupVite } = await import("./vite");
+      await setupVite(httpServer, app);
+    }
+
+    // --- 5️⃣ Start server ---
+    const port = parseInt(process.env.PORT || "5000", 10);
+    httpServer.listen(
+      { port, host: "0.0.0.0", reusePort: true },
+      () => log(`🚀 Server running on port ${port}`),
+    );
+  } catch (err: any) {
+    console.error("❌ Unexpected error in server startup:", err.message || err);
+    console.error(err.stack || "");
+    process.exit(1);
   }
-
-  // --- 5️⃣ Start server ---
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    { port, host: "0.0.0.0", reusePort: true },
-    () => log(`🚀 Server running on port ${port}`),
-  );
 })();
