@@ -1,13 +1,17 @@
 // server/index.ts
 
-// --- 1️⃣ Global startup logging ---
-console.log("🚀 Starting server...");
+import fs from "fs";
 
-// --- 2️⃣ Global error handlers ---
+// --- 1️⃣ Log everything to a file for Render ---
+const logFile = fs.createWriteStream("/tmp/render-debug.log", { flags: "a" });
+console.log = (...args: any[]) => logFile.write(args.join(" ") + "\n");
+console.error = (...args: any[]) => logFile.write(args.join(" ") + "\n");
+
+// --- 2️⃣ Global startup logging and error handlers ---
+console.log("🚀 Starting server...");
 process.on("unhandledRejection", (reason) => {
   console.error("❌ Unhandled Promise Rejection:", reason);
 });
-
 process.on("uncaughtException", (err) => {
   console.error("❌ Uncaught Exception:", err);
 });
@@ -39,7 +43,7 @@ declare module "http" {
   }
 }
 
-// --- Middleware to capture raw JSON body ---
+// --- Middleware ---
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -57,7 +61,6 @@ export function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
@@ -98,7 +101,7 @@ app.use((req, res, next) => {
 
     const db = drizzle(pool, { schema });
 
-    // TEMP: test connection
+    // Test connection
     try {
       console.log("🔄 Initializing DB...");
       await pool.query("SELECT 1");
@@ -109,11 +112,15 @@ app.use((req, res, next) => {
       process.exit(1);
     }
 
-    // REAL: run migrations
+    // Run migrations with per-migration logging
     try {
       console.log("🔄 Running migrations...");
-      await migrate(db, { migrationsFolder: join(__dirname, "../migrations") });
-      console.log("✅ Migrations complete");
+      await migrate(db, {
+        migrationsFolder: join(__dirname, "../migrations"),
+        onMigrationStart: (name) => console.log(`➡ Applying migration: ${name}`),
+        onMigrationComplete: (name) => console.log(`✅ Migration applied: ${name}`),
+      });
+      console.log("✅ All migrations complete");
     } catch (err: any) {
       console.error("❌ Migration failed:", err.message || err);
       console.error(err.stack || "");
@@ -127,13 +134,8 @@ app.use((req, res, next) => {
     app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
-
       console.error("Internal Server Error:", err);
-
-      if (res.headersSent) {
-        return next(err);
-      }
-
+      if (res.headersSent) return next(err);
       return res.status(status).json({ message });
     });
 
@@ -147,9 +149,8 @@ app.use((req, res, next) => {
 
     // --- 5️⃣ Start server ---
     const port = parseInt(process.env.PORT || "5000", 10);
-    httpServer.listen(
-      { port, host: "0.0.0.0", reusePort: true },
-      () => log(`🚀 Server running on port ${port}`),
+    httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
+      log(`🚀 Server running on port ${port}`),
     );
   } catch (err: any) {
     console.error("❌ Unexpected error in server startup:", err.message || err);
