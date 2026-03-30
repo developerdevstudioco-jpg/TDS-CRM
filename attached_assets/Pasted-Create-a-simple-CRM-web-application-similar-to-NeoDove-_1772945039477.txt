@@ -1,0 +1,126 @@
+Create a simple CRM web application similar to NeoDove with minimal features.
+
+Tech Stack:
+- Backend: Node.js with Express
+- Database: SQLite
+- Frontend: Simple HTML, CSS, and JavaScript (no frameworks needed)
+- Should run easily in Replit
+
+Main Requirements:
+
+1. Authentication
+- Simple login system
+- Admin can create users
+- Users can log in and manage leads
+
+2. Lead Management
+Lead fields:
+- Name
+- Mobile Number
+- Email ID
+- Company Name
+- Lead Status
+
+Lead Status options:
+- Open
+- Cold
+- Warm
+- Will Convert
+- Not Interested
+- Converted
+
+Features:
+- Add new lead
+- Edit lead
+- Delete lead
+- View all leads in a table
+- Filter leads by status
+- Search by name or mobile
+
+3. Bulk Lead Upload
+- Upload CSV file
+- CSV columns: name, mobile, email, company
+- System should import leads into database
+
+4. Message Templates
+Admin can create templates for messages.
+
+Example templates:
+- CCNA Course Follow-up
+- Webinar Reminder
+- Demo Session Reminder
+
+5. Send WhatsApp
+Each lead row should have a "Send WhatsApp" button.
+
+When clicked:
+- User selects a message template
+- System opens WhatsApp Web using:
+
+https://wa.me/<mobile>?text=<encoded_message>
+
+Example:
+https://wa.me/919876543210?text=Hello%20Thanks%20for%20contacting%20Cyber%20Network
+
+6. Send SMS
+Add a button "Send SMS"
+
+Use:
+sms:<mobile>?body=<message>
+
+So default SMS app opens with prefilled message.
+
+7. Dashboard
+Simple dashboard showing:
+- Total Leads
+- Open Leads
+- Warm Leads
+- Converted Leads
+
+8. User Management
+Admin can:
+- Create user
+- Delete user
+- Assign leads to users
+
+9. UI
+- Clean dashboard
+- Table view for leads
+- Buttons for:
+  Add Lead
+  Upload CSV
+  Send WhatsApp
+  Send SMS
+  Change Status
+
+10. Project Structure
+
+/server
+  server.js
+/database
+  db.js
+/routes
+  leads.js
+  users.js
+  templates.js
+/public
+  index.html
+  dashboard.html
+  leads.html
+  style.css
+/uploads
+
+11. Extra Features
+- Pagination for leads
+- Export leads to CSV
+- Lead activity log (optional)
+
+12. Important
+Do NOT use WhatsApp API.
+Only open WhatsApp Web with prefilled message.
+
+The system should be lightweight and easy to run.
+
+Add instructions to run:
+npm install
+node server.js
