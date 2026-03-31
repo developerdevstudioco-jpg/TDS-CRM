@@ -128,7 +128,7 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
     }
 
     // --- Catch-all for SPA routes (MUST be after all API routes) ---
-    app.get("*", (_req, res) => {
+    app.get("/{*path}", (_req, res) => {
       res.sendFile(join(clientDistPath, "index.html"));
     });
 
