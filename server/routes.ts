@@ -83,7 +83,8 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
-      throw err;
+      console.error("route error:", err);
+      return res.status(500).json({ message: (err as any)?.message || String(err) });
     }
   });
 
@@ -159,7 +160,8 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
-      throw err;
+      console.error("route error:", err);
+      return res.status(500).json({ message: (err as any)?.message || String(err) });
     }
   });
 
@@ -185,7 +187,8 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
-      throw err;
+      console.error("route error:", err);
+      return res.status(500).json({ message: (err as any)?.message || String(err) });
     }
   });
 
@@ -243,7 +246,8 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
-      throw err;
+      console.error("route error:", err);
+      return res.status(500).json({ message: (err as any)?.message || String(err) });
     }
   });
 
@@ -286,7 +290,8 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
-      throw err;
+      console.error("route error:", err);
+      return res.status(500).json({ message: (err as any)?.message || String(err) });
     }
   });
 
