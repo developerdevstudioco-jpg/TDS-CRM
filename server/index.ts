@@ -71,11 +71,10 @@ const clientDistPath = join(__dirname, "../client/dist");
 // Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
 
-// Catch-all route for SPA: always return index.html
+// Catch-all for SPA routes
 app.get("*", (_req, res) => {
-  res.sendFile(path.join(clientDistPath, "index.html"));
+  res.sendFile(join(clientDistPath, "index.html"));
 });
-
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
 // --- Async startup: DB, migrations, API routes ---
@@ -90,7 +89,6 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
     const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
     const db = drizzle(pool, { schema });
 
-    // Test DB connection
     try {
       log("🔄 Testing DB connection...");
       await pool.query("SELECT 1");
