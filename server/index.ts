@@ -72,7 +72,7 @@ const clientDistPath = join(__dirname, "../client/dist");
 app.use(express.static(clientDistPath));
 
 // Catch-all for SPA routes
-app.get("*", (_req, res) => {
+app.get("/*", (_req, res) => {
   res.sendFile(join(clientDistPath, "index.html"));
 });
 log(`ℹ React frontend will be served from ${clientDistPath}`);
