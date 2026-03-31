@@ -281,7 +281,7 @@ export async function registerRoutes(
     res.status(200).json(templates);
   });
 
-  app.post(api.templates.create.path, requireAdmin, async (req, res) => {
+  app.post(api.templates.create.path, requireAuth, async (req, res) => {
     try {
       const input = api.templates.create.input.parse(req.body);
       const template = await storage.createTemplate(input);
