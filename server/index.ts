@@ -1,3 +1,4 @@
+// server/index.ts
 import fs from "fs";
 import path, { dirname, join } from "path";
 import express from "express";
@@ -37,7 +38,6 @@ app.use(express.urlencoded({ extended: false }));
 // --- Request logging middleware ---
 app.use((req, res, next) => {
   const start = Date.now();
-  const pathReq = req.path;
   let capturedJsonResponse: Record<string, any> | undefined;
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
@@ -45,8 +45,8 @@ app.use((req, res, next) => {
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
   res.on("finish", () => {
-    if (pathReq.startsWith("/api")) {
-      let line = `${req.method} ${pathReq} ${res.statusCode} in ${Date.now() - start}ms`;
+    if (req.path.startsWith("/api")) {
+      let line = `${req.method} ${req.path} ${res.statusCode} in ${Date.now() - start}ms`;
       if (capturedJsonResponse) line += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       log(line, "express");
     }
@@ -64,16 +64,19 @@ app.get("/server-log", (_req, res) => {
 app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-// --- Serve React frontend (static + catch-all) ---
-// Must be BEFORE server listen, outside async
+// --- Serve React frontend (from client/dist) ---
 const clientDistPath = join(__dirname, "../client/dist");
+
+// Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
+
+// Catch-all for SPA routes
 app.get("*", (_req, res) => {
   res.sendFile(join(clientDistPath, "index.html"));
 });
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
-// --- Async startup for DB, migrations, API routes ---
+// --- Async startup: DB, migrations, API routes ---
 (async () => {
   try {
     const dbUrl = process.env.DATABASE_URL;
@@ -133,6 +136,4 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
 
 // --- Start server ---
 const port = parseInt(process.env.PORT || "5000", 10);
-httpServer.listen({ port, host: "0.0.0.0", reusePort: true }, () =>
-  log(`🚀 Server listening on port ${port}`)
-);
+httpServer.listen(port, () => log(`🚀 Server listening on port ${port}`));

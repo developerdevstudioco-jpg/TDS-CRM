@@ -4,10 +4,12 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
-  root: ".", // client folder is the root
+  root: ".",             // Treat client/ as root
+  base: "./",            // Ensures relative paths in index.html
+  publicDir: "public",   // Only copy assets like logos
   build: {
-    outDir: "dist", // this will create client/dist
-    emptyOutDir: true, // clear old builds
+    outDir: "dist",      // Output to client/dist
+    emptyOutDir: true,   // Clear old dist folder
     rollupOptions: {
       input: path.resolve(__dirname, "index.html"),
     },
