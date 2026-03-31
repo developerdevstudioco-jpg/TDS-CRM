@@ -32,17 +32,17 @@ function Router() {
     );
   }
 
-  // Unauthenticated users
+  // Unauthenticated users: always show login
   if (!user) {
     return (
       <Routes>
         <Route path="/login" component={Login} />
-        <Route path="*" component={Login} />
+        <Route path="/*" component={Login} /> {/* fixed wildcard */}
       </Routes>
     );
   }
 
-  // Authenticated users
+  // Authenticated users: main app
   return (
     <Layout>
       <Routes>
@@ -50,7 +50,7 @@ function Router() {
         <Route path="/leads" component={Leads} />
         <Route path="/templates" component={Templates} />
         <Route path="/users" component={Users} />
-        <Route path="*" component={NotFound} />
+        <Route path="/*" component={NotFound} /> {/* fixed wildcard */}
       </Routes>
     </Layout>
   );
