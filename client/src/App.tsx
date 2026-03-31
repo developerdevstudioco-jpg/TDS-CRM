@@ -1,5 +1,5 @@
 // client/src/App.tsx
-import { Routes, Route } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -35,23 +35,23 @@ function Router() {
   // Unauthenticated users: always show login
   if (!user) {
     return (
-      <Routes>
+      <Switch>
         <Route path="/login" component={Login} />
-        <Route path="/*" component={Login} /> {/* fixed wildcard */}
-      </Routes>
+        <Route component={Login} />
+      </Switch>
     );
   }
 
   // Authenticated users: main app
   return (
     <Layout>
-      <Routes>
+      <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/leads" component={Leads} />
         <Route path="/templates" component={Templates} />
         <Route path="/users" component={Users} />
-        <Route path="/*" component={NotFound} /> {/* fixed wildcard */}
-      </Routes>
+        <Route component={NotFound} />
+      </Switch>
     </Layout>
   );
 }
