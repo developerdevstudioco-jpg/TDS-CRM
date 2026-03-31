@@ -17,6 +17,7 @@ const __dirname = dirname(__filename);
 const logFolder = join(process.cwd(), "uploads");
 const logFilePath = join(logFolder, "server.log");
 if (!fs.existsSync(logFolder)) fs.mkdirSync(logFolder, { recursive: true });
+
 function log(message: string, source = "server") {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] [${source}] ${message}`;
@@ -70,10 +71,11 @@ const clientDistPath = join(__dirname, "../client/dist");
 // Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
 
-// Catch-all for SPA routes
+// Catch-all route for SPA: always return index.html
 app.get("*", (_req, res) => {
-  res.sendFile(join(clientDistPath, "index.html"));
+  res.sendFile(path.join(clientDistPath, "index.html"));
 });
+
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
 // --- Async startup: DB, migrations, API routes ---
@@ -88,6 +90,7 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
     const pool = new Pool({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
     const db = drizzle(pool, { schema });
 
+    // Test DB connection
     try {
       log("🔄 Testing DB connection...");
       await pool.query("SELECT 1");
@@ -103,7 +106,8 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
       const metaFolder = join(migrationsFolder, "meta");
       const journalFile = join(metaFolder, "_journal.json");
       if (!fs.existsSync(metaFolder)) fs.mkdirSync(metaFolder, { recursive: true });
-      if (!fs.existsSync(journalFile)) fs.writeFileSync(journalFile, JSON.stringify({ entries: [] }, null, 2));
+      if (!fs.existsSync(journalFile))
+        fs.writeFileSync(journalFile, JSON.stringify({ entries: [] }, null, 2));
       log(`ℹ _journal.json ensured at ${journalFile}`);
 
       try {
