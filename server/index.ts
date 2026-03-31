@@ -70,11 +70,6 @@ const clientDistPath = join(__dirname, "../client/dist/public");
 
 // Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
-
-// Catch-all for SPA routes
-app.get("/*", (_req, res) => {
-  res.sendFile(join(clientDistPath, "index.html"));
-});
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
 // --- Async startup: DB, migrations, API routes ---
@@ -131,11 +126,17 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
     } catch (err) {
       log("⚠ registerRoutes failed, using dummy routes: " + err);
     }
+
+    // --- Catch-all for SPA routes (MUST be after all API routes) ---
+    app.get("*", (_req, res) => {
+      res.sendFile(join(clientDistPath, "index.html"));
+    });
+
+    // --- Start server (MUST be after all routes are registered) ---
+    const port = parseInt(process.env.PORT || "5000", 10);
+    httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
+
   } catch (err: any) {
     log("❌ Fatal startup error: " + (err.message || err));
   }
 })();
-
-// --- Start server ---
-const port = parseInt(process.env.PORT || "5000", 10);
-httpServer.listen(port, () => log(`🚀 Server listening on port ${port}`));
