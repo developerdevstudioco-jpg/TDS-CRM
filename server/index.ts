@@ -1,7 +1,6 @@
-// server/index.ts
 import fs from "fs";
 import path, { dirname, join } from "path";
-import express, { type Request, Response, NextFunction } from "express";
+import express from "express";
 import { createServer } from "http";
 import "dotenv/config";
 import { fileURLToPath } from "url";
@@ -65,7 +64,16 @@ app.get("/server-log", (_req, res) => {
 app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-// --- Async startup ---
+// --- Serve React frontend (static + catch-all) ---
+// Must be BEFORE server listen, outside async
+const clientDistPath = join(__dirname, "../client/dist");
+app.use(express.static(clientDistPath));
+app.get("*", (_req, res) => {
+  res.sendFile(join(clientDistPath, "index.html"));
+});
+log(`ℹ React frontend will be served from ${clientDistPath}`);
+
+// --- Async startup for DB, migrations, API routes ---
 (async () => {
   try {
     const dbUrl = process.env.DATABASE_URL;
@@ -114,19 +122,10 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
     try {
       const { registerRoutes } = await import("./routes");
       await registerRoutes(httpServer, app);
-      log("✅ Routes registered");
+      log("✅ API Routes registered");
     } catch (err) {
       log("⚠ registerRoutes failed, using dummy routes: " + err);
     }
-
-    // --- Serve React frontend ---
-    const clientDistPath = join(__dirname, "../client/dist");
-    app.use(express.static(clientDistPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(join(clientDistPath, "index.html"));
-    });
-    log(`ℹ React frontend served from ${clientDistPath}`);
-    
   } catch (err: any) {
     log("❌ Fatal startup error: " + (err.message || err));
   }
