@@ -128,10 +128,12 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
     }
 
     // --- Catch-all for SPA routes (MUST be after all API routes) ---
+    app.get("/", (_req, res) => {
+      res.sendFile(join(clientDistPath, "index.html"));
+    });
     app.get("/{*path}", (_req, res) => {
       res.sendFile(join(clientDistPath, "index.html"));
     });
-
     // --- Start server (MUST be after all routes are registered) ---
     const port = parseInt(process.env.PORT || "5000", 10);
     httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
