@@ -66,7 +66,7 @@ app.get("/api/test", (_req, res) => res.json({ ok: true }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 // --- Serve React frontend (from client/dist) ---
-const clientDistPath = join(__dirname, "../client/dist/public");
+const clientDistPath = join(__dirname, "../dist/public");
 
 // Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
