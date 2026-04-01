@@ -50,23 +50,23 @@ function formatFollowUp(dateStr: string | null) {
   const d = new Date(dateStr);
   const today = getToday();
   const tomorrow = getTomorrow();
-  if (isSameDay(d, today)) return { label: "Today", color: "text-sky-600 bg-sky-50 border-sky-200" };
-  if (isSameDay(d, tomorrow)) return { label: "Tomorrow", color: "text-indigo-600 bg-indigo-50 border-indigo-200" };
+  if (isSameDay(d, today)) return { label: "Today", color: "text-sky-400 bg-sky-400/10 border-sky-400/25" };
+  if (isSameDay(d, tomorrow)) return { label: "Tomorrow", color: "text-indigo-400 bg-indigo-400/10 border-indigo-400/25" };
   d.setHours(0, 0, 0, 0);
-  if (d < today) return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), color: "text-red-600 bg-red-50 border-red-200" };
-  return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), color: "text-green-600 bg-green-50 border-green-200" };
+  if (d < today) return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), color: "text-red-400 bg-red-400/10 border-red-400/25" };
+  return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/25" };
 }
 
 function StatusBadge({ status }: { status: string }) {
   const getColors = () => {
     switch(status) {
-      case 'Open': return 'bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200';
-      case 'Warm': return 'bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200';
-      case 'Converted': return 'bg-green-100 text-green-700 hover:bg-green-100 border-green-200';
-      case 'Not Interested': return 'bg-red-100 text-red-700 hover:bg-red-100 border-red-200';
-      case 'Will Convert': return 'bg-purple-100 text-purple-700 hover:bg-purple-100 border-purple-200';
-      case 'Cold': return 'bg-slate-100 text-slate-700 hover:bg-slate-100 border-slate-200';
-      default: return 'bg-gray-100 text-gray-700 hover:bg-gray-100 border-gray-200';
+      case 'Open': return 'bg-blue-400/10 text-blue-400 hover:bg-blue-400/10 border-blue-400/25';
+      case 'Warm': return 'bg-amber-400/10 text-amber-400 hover:bg-amber-400/10 border-amber-400/25';
+      case 'Converted': return 'bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/10 border-emerald-400/25';
+      case 'Not Interested': return 'bg-red-400/10 text-red-400 hover:bg-red-400/10 border-red-400/25';
+      case 'Will Convert': return 'bg-purple-400/10 text-purple-400 hover:bg-purple-400/10 border-purple-400/25';
+      case 'Cold': return 'bg-slate-400/10 text-slate-400 hover:bg-slate-400/10 border-slate-400/25';
+      default: return 'bg-gray-400/10 text-gray-400 hover:bg-gray-400/10 border-gray-400/25';
     }
   };
   return <Badge variant="outline" className={`font-medium ${getColors()}`}>{status}</Badge>;
@@ -129,7 +129,7 @@ function InlineFollowUpCell({ lead, onUpdate }: { lead: LeadWithUser; onUpdate: 
           onChange={(e) => setTempDate(e.target.value)}
           onBlur={handleBlur}
           autoFocus
-          className="h-7 text-xs border border-border rounded px-1.5 bg-background w-32 focus:outline-none focus:ring-1 focus:ring-primary"
+          className="h-7 text-xs border border-border rounded px-1.5 bg-background w-32 focus:outline-none focus:ring-1 focus:ring-primary/50"
         />
         <button
           onMouseDown={(e) => { e.preventDefault(); onUpdate(lead.id, null); setEditing(false); }}
@@ -342,7 +342,7 @@ function BulkActionBar({ selectedCount, onClearSelection, onBulkStatusChange, on
   users: Array<{ id: number; username: string }>; isPending: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg flex-wrap">
+    <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/10 border border-primary/20 rounded-lg flex-wrap">
       <div className="flex items-center gap-2 mr-2">
         <span className="text-sm font-semibold text-primary">{selectedCount} selected</span>
         <button onClick={onClearSelection} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
@@ -578,12 +578,12 @@ export default function Leads() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold tracking-tight">Leads Management</h1>
+          <h1 className="text-3xl font-display font-bold tracking-tight">Leads</h1>
           <p className="text-muted-foreground mt-1">Add, update, and communicate with your prospects.</p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
-          <Button variant="outline" className="bg-white" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
+          <Button variant="outline" className="bg-background" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
             {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
             Import CSV
           </Button>
@@ -670,15 +670,15 @@ export default function Leads() {
         />
       )}
 
-      <Card className="border-border/50 shadow-sm">
-        <CardHeader className="p-4 border-b border-border/40 bg-muted/10 flex flex-col gap-3 space-y-0">
+      <Card className="border-white/8 shadow-sm bg-card rounded-2xl">
+        <CardHeader className="p-4 border-b border-white/5 bg-white/3 flex flex-col gap-3 space-y-0">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[180px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search leads..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <Input placeholder="Search leads..." className="pl-9 bg-background" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 bg-white h-9 text-sm" data-testid="select-filter-status">
+              <SelectTrigger className="w-40 bg-background h-9 text-sm" data-testid="select-filter-status">
                 <Filter className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -688,7 +688,7 @@ export default function Leads() {
               </SelectContent>
             </Select>
             <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
-              <SelectTrigger className="w-44 bg-white h-9 text-sm" data-testid="select-filter-followup">
+              <SelectTrigger className="w-44 bg-background h-9 text-sm" data-testid="select-filter-followup">
                 <CalendarClock className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="Follow-up" />
               </SelectTrigger>
@@ -719,7 +719,7 @@ export default function Leads() {
           ) : (
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader className="bg-muted/5">
+                <TableHeader className="bg-white/3">
                   <TableRow>
                     <TableHead className="w-10 pl-4">
                       <Checkbox
@@ -741,7 +741,7 @@ export default function Leads() {
                   {filteredLeads.map((lead) => (
                     <TableRow
                       key={lead.id}
-                      className={`group hover:bg-muted/30 transition-colors ${selectedIds.has(lead.id) ? 'bg-primary/5' : ''}`}
+                      className={`group hover:bg-white/5 transition-colors ${selectedIds.has(lead.id) ? 'bg-primary/10' : ''}`}
                       data-testid={`row-lead-${lead.id}`}
                     >
                       <TableCell className="pl-4">
