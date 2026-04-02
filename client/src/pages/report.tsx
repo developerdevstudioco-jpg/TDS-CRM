@@ -140,7 +140,7 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
 export default function Report() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<ReportPeriod>("today");
-  const [activeTab, setActiveTab] = useState<'me' | 'team'>'me');
+  const [activeTab, setActiveTab] = useState<'me' | 'team'>('me');
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
 
