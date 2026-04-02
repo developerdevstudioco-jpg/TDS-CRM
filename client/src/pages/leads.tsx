@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
-  Search, Plus, MoreVertical, Upload, Trash2, Edit2, MessageCircle, MessageSquare,
+  Search, Plus, MoreVertical, Upload, Trash2, Edit2, MessageCircle, MessageSquare, Phone,
   Loader2, FileDown, ClipboardList, StickyNote, ArrowRightLeft, Clock, Users,
   ChevronDown, X, CalendarClock, Filter, Calendar
 } from "lucide-react";
@@ -269,6 +269,21 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
         </div>
       </div>
       <Separator />
+      {/* Quick Actions - Call, WhatsApp, SMS */}
+      <div className="py-4 grid grid-cols-3 gap-2">
+        <a href={`tel:${lead.mobile}`} className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 hover:bg-emerald-400/20 transition-colors">
+          <Phone className="h-5 w-5" />
+          <span className="text-xs font-medium">Call</span>
+        </a>
+        <a href={`https://wa.me/${lead.mobile.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-green-400/10 border border-green-400/20 text-green-400 hover:bg-green-400/20 transition-colors">
+          <MessageCircle className="h-5 w-5" />
+          <span className="text-xs font-medium">WhatsApp</span>
+        </a>
+        <a href={`sms:${lead.mobile}`} className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-blue-400/10 border border-blue-400/20 text-blue-400 hover:bg-blue-400/20 transition-colors">
+          <MessageSquare className="h-5 w-5" />
+          <span className="text-xs font-medium">SMS</span>
+        </a>
+      </div>
       <div className="py-4 space-y-3">
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Change Status</h4>
         <div className="flex gap-2">
