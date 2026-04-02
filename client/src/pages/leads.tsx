@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { useLeads, useCreateLead, useUpdateLead, useDeleteLead, useUploadCsv, useBulkUpdateLeads } from "@/hooks/use-leads";
 import { useLeadActivities, useCreateLeadActivity } from "@/hooks/use-lead-activities";
 import { useUsers } from "@/hooks/use-users";
+import { useTemplates } from "@/hooks/use-templates";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, Plus, MoreVertical, Upload, Trash2, Edit2, MessageCircle, MessageSquare, Phone,
   Loader2, FileDown, ClipboardList, StickyNote, ArrowRightLeft, Clock, Users,
-  ChevronDown, X, CalendarClock, Filter, Calendar
+  ChevronDown, X, CalendarClock, Filter, Calendar, Send, PenLine, MessageSquareText
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lead } from "@shared/schema";
@@ -50,23 +51,23 @@ function formatFollowUp(dateStr: string | null) {
   const d = new Date(dateStr);
   const today = getToday();
   const tomorrow = getTomorrow();
-  if (isSameDay(d, today)) return { label: "Today", color: "text-sky-400 bg-sky-400/10 border-sky-400/25" };
-  if (isSameDay(d, tomorrow)) return { label: "Tomorrow", color: "text-indigo-400 bg-indigo-400/10 border-indigo-400/25" };
+  if (isSameDay(d, today)) return { label: "Today", color: "text-sky-600 bg-sky-50 border-sky-200" };
+  if (isSameDay(d, tomorrow)) return { label: "Tomorrow", color: "text-indigo-600 bg-indigo-50 border-indigo-200" };
   d.setHours(0, 0, 0, 0);
-  if (d < today) return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), color: "text-red-400 bg-red-400/10 border-red-400/25" };
-  return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), color: "text-emerald-400 bg-emerald-400/10 border-emerald-400/25" };
+  if (d < today) return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), color: "text-red-600 bg-red-50 border-red-200" };
+  return { label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }), color: "text-green-600 bg-green-50 border-green-200" };
 }
 
 function StatusBadge({ status }: { status: string }) {
   const getColors = () => {
     switch(status) {
-      case 'Open': return 'bg-blue-400/10 text-blue-400 hover:bg-blue-400/10 border-blue-400/25';
-      case 'Warm': return 'bg-amber-400/10 text-amber-400 hover:bg-amber-400/10 border-amber-400/25';
-      case 'Converted': return 'bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/10 border-emerald-400/25';
-      case 'Not Interested': return 'bg-red-400/10 text-red-400 hover:bg-red-400/10 border-red-400/25';
-      case 'Will Convert': return 'bg-purple-400/10 text-purple-400 hover:bg-purple-400/10 border-purple-400/25';
-      case 'Cold': return 'bg-slate-400/10 text-slate-400 hover:bg-slate-400/10 border-slate-400/25';
-      default: return 'bg-gray-400/10 text-gray-400 hover:bg-gray-400/10 border-gray-400/25';
+      case 'Open': return 'bg-blue-100 text-blue-700 hover:bg-blue-100 border-blue-200';
+      case 'Warm': return 'bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200';
+      case 'Converted': return 'bg-green-100 text-green-700 hover:bg-green-100 border-green-200';
+      case 'Not Interested': return 'bg-red-100 text-red-700 hover:bg-red-100 border-red-200';
+      case 'Will Convert': return 'bg-purple-100 text-purple-700 hover:bg-purple-100 border-purple-200';
+      case 'Cold': return 'bg-slate-100 text-slate-700 hover:bg-slate-100 border-slate-200';
+      default: return 'bg-gray-100 text-gray-700 hover:bg-gray-100 border-gray-200';
     }
   };
   return <Badge variant="outline" className={`font-medium ${getColors()}`}>{status}</Badge>;
@@ -129,7 +130,7 @@ function InlineFollowUpCell({ lead, onUpdate }: { lead: LeadWithUser; onUpdate: 
           onChange={(e) => setTempDate(e.target.value)}
           onBlur={handleBlur}
           autoFocus
-          className="h-7 text-xs border border-border rounded px-1.5 bg-background w-32 focus:outline-none focus:ring-1 focus:ring-primary/50"
+          className="h-7 text-xs border border-border rounded px-1.5 bg-background w-32 focus:outline-none focus:ring-1 focus:ring-primary"
         />
         <button
           onMouseDown={(e) => { e.preventDefault(); onUpdate(lead.id, null); setEditing(false); }}
@@ -206,6 +207,165 @@ function InlineAssignedCell({ lead, users, onUpdate }: {
   );
 }
 
+
+// Replaces variables in template content with lead data
+function fillTemplate(content: string, lead: LeadWithUser): string {
+  return content
+    .replace(/\{\{name\}\}/g, lead.name || '')
+    .replace(/\{\{company\}\}/g, lead.company || '')
+    .replace(/\{\{status\}\}/g, lead.status || '');
+}
+
+function MessagePickerDialog({ lead, type, onClose }: {
+  lead: LeadWithUser;
+  type: 'whatsapp' | 'sms';
+  onClose: () => void;
+}) {
+  const { data: templates, isLoading } = useTemplates();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'custom' | null>(null);
+  const [customMessage, setCustomMessage] = useState('');
+  const [previewMessage, setPreviewMessage] = useState('');
+
+  const isWhatsApp = type === 'whatsapp';
+
+  const handleSelectTemplate = (id: number | 'custom') => {
+    setSelectedTemplateId(id);
+    if (id === 'custom') {
+      setPreviewMessage(customMessage);
+    } else {
+      const template = templates?.find(t => t.id === id);
+      if (template) setPreviewMessage(fillTemplate(template.content, lead));
+    }
+  };
+
+  const handleSend = () => {
+    const msg = selectedTemplateId === 'custom' ? customMessage : previewMessage;
+    if (!msg.trim()) return;
+    const encodedMsg = encodeURIComponent(msg);
+    const number = lead.mobile.replace(/\D/g, '');
+    if (isWhatsApp) {
+      window.open(`https://wa.me/${number}?text=${encodedMsg}`, '_blank');
+    } else {
+      window.open(`sms:${lead.mobile}?body=${encodedMsg}`, '_blank');
+    }
+    onClose();
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[480px] bg-card border-white/10">
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2">
+            {isWhatsApp
+              ? <><MessageCircle className="h-5 w-5 text-green-400" /> Send WhatsApp</>
+              : <><MessageSquare className="h-5 w-5 text-blue-400" /> Send SMS</>
+            }
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* To */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-white/5 rounded-xl px-4 py-2.5 border border-white/8">
+            <span className="font-medium text-foreground">To:</span>
+            <span>{lead.name}</span>
+            <span className="text-muted-foreground">·</span>
+            <span>{lead.mobile}</span>
+          </div>
+
+          {/* Template list */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Choose a template</p>
+            {isLoading ? (
+              <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {/* Custom message option */}
+                <button
+                  onClick={() => handleSelectTemplate('custom')}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
+                    selectedTemplateId === 'custom'
+                      ? 'bg-primary/10 border-primary/30 text-primary'
+                      : 'bg-white/3 border-white/8 text-foreground hover:bg-white/6 hover:border-white/15'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <PenLine className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">Custom Message</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 ml-6">Type your own message</p>
+                </button>
+
+                {templates?.map(template => (
+                  <button
+                    key={template.id}
+                    onClick={() => handleSelectTemplate(template.id)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
+                      selectedTemplateId === template.id
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-white/3 border-white/8 text-foreground hover:bg-white/6 hover:border-white/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <MessageSquareText className="h-4 w-4 shrink-0" />
+                      <span className="text-sm font-medium">{template.name}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 ml-6 line-clamp-1">{template.content}</p>
+                  </button>
+                ))}
+
+                {templates?.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No templates yet. Use Custom Message.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Message preview / custom input */}
+          {selectedTemplateId !== null && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {selectedTemplateId === 'custom' ? 'Your Message' : 'Preview'}
+              </p>
+              {selectedTemplateId === 'custom' ? (
+                <Textarea
+                  placeholder="Type your message..."
+                  value={customMessage}
+                  onChange={e => setCustomMessage(e.target.value)}
+                  className="resize-none bg-white/5 border-white/10 focus:border-primary/50 text-sm"
+                  rows={4}
+                  autoFocus
+                />
+              ) : (
+                <div className="bg-white/5 border border-white/8 rounded-xl px-4 py-3 text-sm text-foreground whitespace-pre-wrap leading-relaxed">
+                  {previewMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancel</Button>
+          <Button
+            onClick={handleSend}
+            disabled={
+              selectedTemplateId === null ||
+              (selectedTemplateId === 'custom' && !customMessage.trim())
+            }
+            className={isWhatsApp
+              ? 'bg-green-500 hover:bg-green-600 text-white'
+              : 'bg-blue-500 hover:bg-blue-600 text-white'
+            }
+          >
+            <Send className="h-4 w-4 mr-2" />
+            {isWhatsApp ? 'Send via WhatsApp' : 'Send via SMS'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
   lead: LeadWithUser; onClose: () => void; onLeadUpdated: () => void;
 }) {
@@ -218,6 +378,7 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
   const [newStatus, setNewStatus] = useState(lead.status);
   const [newFollowUpDate, setNewFollowUpDate] = useState(toDateInputValue(lead.followUpDate));
   const [isUpdating, setIsUpdating] = useState(false);
+  const [msgPickerType, setMsgPickerType] = useState<'whatsapp' | 'sms' | null>(null);
 
   const handleStatusChange = async () => {
     if (newStatus === lead.status) return;
@@ -269,21 +430,38 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
         </div>
       </div>
       <Separator />
-      {/* Quick Actions - Call, WhatsApp, SMS */}
+      {/* Quick Actions */}
       <div className="py-4 grid grid-cols-3 gap-2">
-        <a href={`tel:${lead.mobile}`} className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 hover:bg-emerald-400/20 transition-colors">
+        <a
+          href={`tel:${lead.mobile}`}
+          className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 hover:bg-emerald-400/20 transition-colors"
+        >
           <Phone className="h-5 w-5" />
           <span className="text-xs font-medium">Call</span>
         </a>
-        <a href={`https://wa.me/${lead.mobile.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-green-400/10 border border-green-400/20 text-green-400 hover:bg-green-400/20 transition-colors">
+        <button
+          onClick={() => setMsgPickerType('whatsapp')}
+          className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-green-400/10 border border-green-400/20 text-green-400 hover:bg-green-400/20 transition-colors"
+        >
           <MessageCircle className="h-5 w-5" />
           <span className="text-xs font-medium">WhatsApp</span>
-        </a>
-        <a href={`sms:${lead.mobile}`} className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-blue-400/10 border border-blue-400/20 text-blue-400 hover:bg-blue-400/20 transition-colors">
+        </button>
+        <button
+          onClick={() => setMsgPickerType('sms')}
+          className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-blue-400/10 border border-blue-400/20 text-blue-400 hover:bg-blue-400/20 transition-colors"
+        >
           <MessageSquare className="h-5 w-5" />
           <span className="text-xs font-medium">SMS</span>
-        </a>
+        </button>
       </div>
+      {msgPickerType && (
+        <MessagePickerDialog
+          lead={lead}
+          type={msgPickerType}
+          onClose={() => setMsgPickerType(null)}
+        />
+      )}
+      <Separator />
       <div className="py-4 space-y-3">
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" /> Change Status</h4>
         <div className="flex gap-2">
@@ -357,7 +535,7 @@ function BulkActionBar({ selectedCount, onClearSelection, onBulkStatusChange, on
   users: Array<{ id: number; username: string }>; isPending: boolean;
 }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/10 border border-primary/20 rounded-lg flex-wrap">
+    <div className="flex items-center gap-3 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-lg flex-wrap">
       <div className="flex items-center gap-2 mr-2">
         <span className="text-sm font-semibold text-primary">{selectedCount} selected</span>
         <button onClick={onClearSelection} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
@@ -593,12 +771,12 @@ export default function Leads() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold tracking-tight">Leads</h1>
+          <h1 className="text-3xl font-display font-bold tracking-tight">Leads Management</h1>
           <p className="text-muted-foreground mt-1">Add, update, and communicate with your prospects.</p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
-          <Button variant="outline" className="bg-background" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
+          <Button variant="outline" className="bg-white" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
             {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
             Import CSV
           </Button>
@@ -685,15 +863,15 @@ export default function Leads() {
         />
       )}
 
-      <Card className="border-white/8 shadow-sm bg-card rounded-2xl">
-        <CardHeader className="p-4 border-b border-white/5 bg-white/3 flex flex-col gap-3 space-y-0">
+      <Card className="border-border/50 shadow-sm">
+        <CardHeader className="p-4 border-b border-border/40 bg-muted/10 flex flex-col gap-3 space-y-0">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[180px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search leads..." className="pl-9 bg-background" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <Input placeholder="Search leads..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 bg-background h-9 text-sm" data-testid="select-filter-status">
+              <SelectTrigger className="w-40 bg-white h-9 text-sm" data-testid="select-filter-status">
                 <Filter className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -703,7 +881,7 @@ export default function Leads() {
               </SelectContent>
             </Select>
             <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
-              <SelectTrigger className="w-44 bg-background h-9 text-sm" data-testid="select-filter-followup">
+              <SelectTrigger className="w-44 bg-white h-9 text-sm" data-testid="select-filter-followup">
                 <CalendarClock className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="Follow-up" />
               </SelectTrigger>
@@ -734,7 +912,7 @@ export default function Leads() {
           ) : (
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader className="bg-white/3">
+                <TableHeader className="bg-muted/5">
                   <TableRow>
                     <TableHead className="w-10 pl-4">
                       <Checkbox
@@ -756,7 +934,7 @@ export default function Leads() {
                   {filteredLeads.map((lead) => (
                     <TableRow
                       key={lead.id}
-                      className={`group hover:bg-white/5 transition-colors ${selectedIds.has(lead.id) ? 'bg-primary/10' : ''}`}
+                      className={`group hover:bg-muted/30 transition-colors ${selectedIds.has(lead.id) ? 'bg-primary/5' : ''}`}
                       data-testid={`row-lead-${lead.id}`}
                     >
                       <TableCell className="pl-4">
