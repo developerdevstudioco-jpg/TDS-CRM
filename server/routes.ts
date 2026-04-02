@@ -96,6 +96,7 @@ export async function registerRoutes(
       if (input.role) updates.role = input.role;
       if (input.username) updates.username = input.username;
       if (input.password) updates.password = await hashPassword(input.password);
+      if (input.managerId !== undefined) updates.managerId = input.managerId;
       const user = await storage.updateUser(id, updates);
       res.status(200).json(user);
     } catch (err) {
@@ -300,5 +301,76 @@ export async function registerRoutes(
     res.status(204).end();
   });
 
+  // Reports API
+  app.get('/api/reports/me', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const { period } = req.query;
+      const { from, to } = getDateRange(period as string);
+      const summary = await storage.getActivitySummary(currentUser.id, from, to);
+      res.status(200).json(summary);
+    } catch (err: any) {
+      console.error("report error:", err);
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/reports/user/:id', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const targetId = Number(req.params.id);
+      // Managers can only view their assigned users
+      if (currentUser.role === 'manager') {
+        const myUsers = await storage.getUsersByManager(currentUser.id);
+        const allowed = myUsers.some(u => u.id === targetId);
+        if (!allowed) return res.status(403).json({ message: "Not authorized" });
+      } else if (currentUser.role !== 'admin') {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      const { period } = req.query;
+      const { from, to } = getDateRange(period as string);
+      const summary = await storage.getActivitySummary(targetId, from, to);
+      res.status(200).json(summary);
+    } catch (err: any) {
+      console.error("report user error:", err);
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
+
+  app.get('/api/reports/my-users', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (currentUser.role === 'manager') {
+        const myUsers = await storage.getUsersByManager(currentUser.id);
+        return res.status(200).json(myUsers);
+      } else if (currentUser.role === 'admin') {
+        const allUsers = await storage.getUsers();
+        return res.status(200).json(allUsers);
+      }
+      return res.status(403).json({ message: "Not authorized" });
+    } catch (err: any) {
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
+
   return httpServer;
+}
+
+function getDateRange(period: string): { from: Date; to: Date } {
+  const now = new Date();
+  const to = new Date(now);
+  to.setDate(to.getDate() + 1);
+  to.setHours(0, 0, 0, 0);
+
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+
+  if (period === 'week') {
+    from.setDate(from.getDate() - from.getDay()); // start of week (Sunday)
+  } else if (period === 'month') {
+    from.setDate(1); // start of month
+  }
+  // default: today
+
+  return { from, to };
 }

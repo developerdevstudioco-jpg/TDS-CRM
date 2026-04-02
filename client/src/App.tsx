@@ -19,6 +19,7 @@ import Dashboard from "@/pages/dashboard";
 import Leads from "@/pages/leads";
 import Templates from "@/pages/templates";
 import Users from "@/pages/users";
+import Report from "@/pages/report";
 
 function Router() {
   const { user, isLoading } = useAuth();
@@ -50,6 +51,7 @@ function Router() {
         <Route path="/leads" component={Leads} />
         <Route path="/templates" component={Templates} />
         <Route path="/users" component={Users} />
+        <Route path="/report" component={Report} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

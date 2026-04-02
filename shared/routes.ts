@@ -29,6 +29,19 @@ const leadWithUserSchema = z.object({
 
 export type LeadWithUser = z.infer<typeof leadWithUserSchema>;
 
+export const activitySummarySchema = z.object({
+  calls: z.number(),
+  whatsapp: z.number(),
+  sms: z.number(),
+  leadsCreated: z.number(),
+  statusChanges: z.number(),
+  notesAdded: z.number(),
+  followUpsSet: z.number(),
+  total: z.number(),
+});
+
+export type ActivitySummary = z.infer<typeof activitySummarySchema>;
+
 export const api = {
   auth: {
     login: {
@@ -80,6 +93,7 @@ export const api = {
         role: z.string().optional(),
         password: z.string().optional(),
         username: z.string().optional(),
+        managerId: z.number().nullable().optional(),
       }),
       responses: {
         200: z.custom<typeof users.$inferSelect>(),
@@ -174,7 +188,7 @@ export const api = {
         method: 'POST' as const,
         path: '/api/leads/:id/activities' as const,
         input: z.object({
-          type: z.enum(['note', 'status_change']),
+          type: z.enum(['note', 'status_change', 'call', 'whatsapp', 'sms', 'follow_up_set']),
           content: z.string().optional(),
         }),
         responses: {
@@ -209,6 +223,20 @@ export const api = {
         404: errorSchemas.notFound,
       }
     }
+  },
+  reports: {
+    me: {
+      method: 'GET' as const,
+      path: '/api/reports/me' as const,
+    },
+    user: {
+      method: 'GET' as const,
+      path: '/api/reports/user/:id' as const,
+    },
+    myUsers: {
+      method: 'GET' as const,
+      path: '/api/reports/my-users' as const,
+    },
   }
 };
 

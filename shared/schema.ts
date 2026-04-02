@@ -8,6 +8,7 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   role: text("role").notNull().default('user'), // 'admin' | 'manager' | 'user'
+  managerId: integer("manager_id"), // which manager this user belongs to
 });
 
 export const leads = pgTable("leads", {
@@ -16,7 +17,7 @@ export const leads = pgTable("leads", {
   mobile: text("mobile").notNull(),
   email: text("email"),
   company: text("company"),
-  status: text("status").notNull().default('Open'), // Open, Cold, Warm, Will Convert, Not Interested, Converted
+  status: text("status").notNull().default('Open'),
   assignedTo: integer("assigned_to").references(() => users.id),
   followUpDate: timestamp("follow_up_date"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -26,7 +27,7 @@ export const leadActivities = pgTable("lead_activities", {
   id: serial("id").primaryKey(),
   leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
   userId: integer("user_id").references(() => users.id),
-  type: text("type").notNull(), // 'status_change' | 'note' | 'created'
+  type: text("type").notNull(), // 'status_change' | 'note' | 'created' | 'call' | 'whatsapp' | 'sms' | 'follow_up_set'
   content: text("content"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -80,6 +81,5 @@ export type InsertLeadActivity = z.infer<typeof insertLeadActivitySchema>;
 // API Request/Response
 export type CreateLeadRequest = InsertLead;
 export type UpdateLeadRequest = Partial<InsertLead>;
-
 export type LeadResponse = Lead;
 export type LeadsListResponse = Lead[];

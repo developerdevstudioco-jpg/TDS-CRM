@@ -216,10 +216,11 @@ function fillTemplate(content: string, lead: LeadWithUser): string {
     .replace(/\{\{status\}\}/g, lead.status || '');
 }
 
-function MessagePickerDialog({ lead, type, onClose }: {
+function MessagePickerDialog({ lead, type, onClose, onSent }: {
   lead: LeadWithUser;
   type: 'whatsapp' | 'sms';
   onClose: () => void;
+  onSent: (type: 'whatsapp' | 'sms', msg: string) => void;
 }) {
   const { data: templates, isLoading } = useTemplates();
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'custom' | null>(null);
@@ -245,8 +246,10 @@ function MessagePickerDialog({ lead, type, onClose }: {
     const number = lead.mobile.replace(/\D/g, '');
     if (isWhatsApp) {
       window.open(`https://wa.me/${number}?text=${encodedMsg}`, '_blank');
+      onSent('whatsapp', msg);
     } else {
       window.open(`sms:${lead.mobile}?body=${encodedMsg}`, '_blank');
+      onSent('sms', msg);
     }
     onClose();
   };
@@ -434,13 +437,14 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
       <div className="py-4 grid grid-cols-3 gap-2">
         <a
           href={`tel:${lead.mobile}`}
+          onClick={() => createActivity.mutate({ type: 'call', content: `Called ${lead.mobile}` })}
           className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 hover:bg-emerald-400/20 transition-colors"
         >
           <Phone className="h-5 w-5" />
           <span className="text-xs font-medium">Call</span>
         </a>
         <button
-          onClick={() => setMsgPickerType('whatsapp')}
+          onClick={() => { setMsgPickerType('whatsapp'); }}
           className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-green-400/10 border border-green-400/20 text-green-400 hover:bg-green-400/20 transition-colors"
         >
           <MessageCircle className="h-5 w-5" />
@@ -459,6 +463,12 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
           lead={lead}
           type={msgPickerType}
           onClose={() => setMsgPickerType(null)}
+          onSent={(type, msg) => {
+            createActivity.mutate({
+              type,
+              content: `${type === 'whatsapp' ? 'WhatsApp' : 'SMS'} sent to ${lead.mobile}: ${msg.substring(0, 60)}${msg.length > 60 ? '...' : ''}`
+            });
+          }}
         />
       )}
       <Separator />

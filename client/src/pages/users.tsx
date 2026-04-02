@@ -25,7 +25,7 @@ export default function Users() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
   const [createForm, setCreateForm] = useState({ username: "", password: "", role: "user" });
-  const [editForm, setEditForm] = useState({ username: "", password: "", role: "user" });
+  const [editForm, setEditForm] = useState({ username: "", password: "", role: "user", managerId: "" as string | number });
 
   if (currentUser?.role !== 'admin') {
     return (
@@ -51,7 +51,7 @@ export default function Users() {
 
   const openEdit = (u: User) => {
     setEditingUser(u);
-    setEditForm({ username: u.username, password: "", role: u.role });
+    setEditForm({ username: u.username, password: "", role: u.role, managerId: u.managerId ?? "" });
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -61,6 +61,8 @@ export default function Users() {
       const payload: any = { id: editingUser.id, role: editForm.role };
       if (editForm.username && editForm.username !== editingUser.username) payload.username = editForm.username;
       if (editForm.password) payload.password = editForm.password;
+      if (editForm.managerId !== "") payload.managerId = Number(editForm.managerId) || null;
+      else payload.managerId = null;
       await updateUser.mutateAsync(payload);
       toast({ title: "User updated successfully" });
       setEditingUser(null);
@@ -191,6 +193,25 @@ export default function Users() {
                   </SelectContent>
                 </Select>
               </div>
+              {editForm.role === 'user' && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-manager">Assign Manager <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                  <Select
+                    value={String(editForm.managerId || "none")}
+                    onValueChange={(val) => setEditForm({...editForm, managerId: val === "none" ? "" : Number(val)})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="No manager" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No manager</SelectItem>
+                      {users?.filter(u => u.role === 'manager' || u.role === 'admin').map(u => (
+                        <SelectItem key={u.id} value={String(u.id)}>{u.username} ({u.role})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button variant="outline" type="button" onClick={() => setEditingUser(null)}>Cancel</Button>
@@ -212,6 +233,7 @@ export default function Users() {
                 <TableRow>
                   <TableHead className="font-semibold text-foreground">Username</TableHead>
                   <TableHead className="font-semibold text-foreground">Role</TableHead>
+                  <TableHead className="font-semibold text-foreground">Manager</TableHead>
                   <TableHead className="text-right font-semibold text-foreground">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -231,6 +253,9 @@ export default function Users() {
                       <Badge variant={getRoleBadgeVariant(u.role)} className="capitalize">
                         {u.role}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {u.managerId ? (users?.find(m => m.id === u.managerId)?.username || '—') : '—'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">

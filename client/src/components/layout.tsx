@@ -18,13 +18,15 @@ import {
   Users,
   MessageSquareQuote,
   LogOut,
-  Settings
+  Settings,
+  BarChart2
 } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Leads", href: "/leads", icon: Users },
   { name: "Templates", href: "/templates", icon: MessageSquareQuote },
+  { name: "My Report", href: "/report", icon: BarChart2 },
 ];
 
 export function AppSidebar() {

@@ -6,10 +6,21 @@ import {
   type Template, type InsertTemplate,
   type LeadActivity, type InsertLeadActivity
 } from "@shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and, gte, lt, sql } from "drizzle-orm";
 
 export type LeadActivityWithUser = LeadActivity & { username?: string };
 export type LeadWithUser = Lead & { assignedUsername?: string | null };
+
+export interface ActivitySummary {
+  calls: number;
+  whatsapp: number;
+  sms: number;
+  leadsCreated: number;
+  statusChanges: number;
+  notesAdded: number;
+  followUpsSet: number;
+  total: number;
+}
 
 export interface IStorage {
   // Users
@@ -17,6 +28,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   getUsers(): Promise<User[]>;
+  getUsersByManager(managerId: number): Promise<User[]>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
   deleteUser(id: number): Promise<void>;
 
@@ -31,6 +43,9 @@ export interface IStorage {
   // Lead Activities
   getLeadActivities(leadId: number): Promise<LeadActivityWithUser[]>;
   createLeadActivity(activity: InsertLeadActivity): Promise<LeadActivity>;
+
+  // Reports
+  getActivitySummary(userId: number, from: Date, to: Date): Promise<ActivitySummary>;
 
   // Templates
   getTemplates(): Promise<Template[]>;
@@ -59,6 +74,10 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(users);
   }
 
+  async getUsersByManager(managerId: number): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.managerId, managerId));
+  }
+
   async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
     const [updated] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
     if (!updated) throw new Error("User not found");
@@ -71,10 +90,6 @@ export class DatabaseStorage implements IStorage {
 
   // Leads
   async getLeads(options?: { assignedTo?: number }): Promise<LeadWithUser[]> {
-    const assignedUsers = db.$with('au').as(
-      db.select({ id: users.id, username: users.username }).from(users)
-    );
-
     let query = db
       .select({
         id: leads.id,
@@ -145,6 +160,44 @@ export class DatabaseStorage implements IStorage {
   async createLeadActivity(activity: InsertLeadActivity): Promise<LeadActivity> {
     const [created] = await db.insert(leadActivities).values(activity).returning();
     return created;
+  }
+
+  // Reports — get activity summary for a user within a date range
+  async getActivitySummary(userId: number, from: Date, to: Date): Promise<ActivitySummary> {
+    const activities = await db
+      .select({ type: leadActivities.type })
+      .from(leadActivities)
+      .where(
+        and(
+          eq(leadActivities.userId, userId),
+          gte(leadActivities.createdAt, from),
+          lt(leadActivities.createdAt, to)
+        )
+      );
+
+    const summary: ActivitySummary = {
+      calls: 0,
+      whatsapp: 0,
+      sms: 0,
+      leadsCreated: 0,
+      statusChanges: 0,
+      notesAdded: 0,
+      followUpsSet: 0,
+      total: 0,
+    };
+
+    for (const a of activities) {
+      summary.total++;
+      if (a.type === 'call') summary.calls++;
+      else if (a.type === 'whatsapp') summary.whatsapp++;
+      else if (a.type === 'sms') summary.sms++;
+      else if (a.type === 'created') summary.leadsCreated++;
+      else if (a.type === 'status_change') summary.statusChanges++;
+      else if (a.type === 'note') summary.notesAdded++;
+      else if (a.type === 'follow_up_set') summary.followUpsSet++;
+    }
+
+    return summary;
   }
 
   // Templates
