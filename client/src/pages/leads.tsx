@@ -786,7 +786,7 @@ export default function Leads() {
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
-          <Button variant="outline" className="bg-white" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
+          <Button variant="outline" className="bg-background" onClick={() => fileInputRef.current?.click()} disabled={uploadCsv.isPending}>
             {uploadCsv.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
             Import CSV
           </Button>
@@ -878,10 +878,10 @@ export default function Leads() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[180px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input placeholder="Search leads..." className="pl-9 bg-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <Input placeholder="Search leads..." className="pl-9 bg-white/5 border-white/10" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 bg-white h-9 text-sm" data-testid="select-filter-status">
+              <SelectTrigger className="w-40 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-status">
                 <Filter className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -891,7 +891,7 @@ export default function Leads() {
               </SelectContent>
             </Select>
             <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
-              <SelectTrigger className="w-44 bg-white h-9 text-sm" data-testid="select-filter-followup">
+              <SelectTrigger className="w-44 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-followup">
                 <CalendarClock className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                 <SelectValue placeholder="Follow-up" />
               </SelectTrigger>
