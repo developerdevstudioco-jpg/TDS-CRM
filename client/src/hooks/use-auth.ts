@@ -8,8 +8,16 @@ export function useAuth() {
   const { data: user, isLoading, error } = useQuery({
     queryKey: [api.auth.me.path],
     queryFn: async () => {
-      const res = await fetch(api.auth.me.path, { credentials: "include" });
+      const res = await fetch(api.auth.me.path, {
+        credentials: "include",
+        headers: { "Cache-Control": "no-cache" },
+      });
       if (res.status === 401) return null;
+      if (res.status === 304) {
+        // Return cached data if available, otherwise treat as unauthenticated
+        const cached = queryClient.getQueryData([api.auth.me.path]);
+        return cached ?? null;
+      }
       if (!res.ok) throw new Error("Failed to fetch session");
       return api.auth.me.responses[200].parse(await res.json());
     },
@@ -25,7 +33,7 @@ export function useAuth() {
         body: JSON.stringify(credentials),
         credentials: "include",
       });
-      
+
       if (!res.ok) {
         try {
           const data = await res.json();
@@ -35,7 +43,7 @@ export function useAuth() {
           throw new Error("Invalid credentials");
         }
       }
-      return api.auth.login.responses[200].parse(await res.json());
+      return api.auth.me.responses[200].parse(await res.json());
     },
     onSuccess: (user) => {
       queryClient.setQueryData([api.auth.me.path], user);
