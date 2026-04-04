@@ -8,7 +8,25 @@ import passport from "passport";
 import multer from "multer";
 import fs from "fs";
 
+import path from "path";
+
+const storage_disk = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = "uploads/pdfs";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+
 const upload = multer({ dest: "uploads/" });
+const uploadPdf = multer({ storage: storage_disk, fileFilter: (req, file, cb) => {
+  if (file.mimetype === "application/pdf") cb(null, true);
+  else cb(new Error("Only PDF files are allowed"));
+}});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -282,10 +300,29 @@ export async function registerRoutes(
     res.status(200).json(templates);
   });
 
+  // Upload PDF for template
+  app.post('/api/templates/upload-pdf', requireAuth, uploadPdf.single('pdf'), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No PDF uploaded" });
+      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const pdfUrl = `${baseUrl}/uploads/pdfs/${req.file.filename}`;
+      res.status(200).json({ pdfUrl, pdfName: req.file.originalname });
+    } catch (err: any) {
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
+
+  // Serve uploaded PDFs
+  app.use('/uploads/pdfs', (req: any, res: any, next: any) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+  });
+
   app.post(api.templates.create.path, requireAuth, async (req, res) => {
     try {
-      const input = api.templates.create.input.parse(req.body);
-      const template = await storage.createTemplate(input);
+      const { name, content, pdfUrl, pdfName } = req.body;
+      if (!name || !content) return res.status(400).json({ message: "Name and content are required" });
+      const template = await storage.createTemplate({ name, content, pdfUrl: pdfUrl || null, pdfName: pdfName || null });
       res.status(201).json(template);
     } catch (err) {
       if (err instanceof z.ZodError) {

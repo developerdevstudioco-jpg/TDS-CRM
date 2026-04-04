@@ -72,6 +72,9 @@ const clientDistPath = join(__dirname, "../dist/public");
 log(`ℹ clientDistPath = ${clientDistPath}`);
 log(`ℹ index.html exists: ${fs.existsSync(join(clientDistPath, "index.html"))}`);
 
+// Serve uploaded PDFs
+app.use('/uploads/pdfs', express.static(join(process.cwd(), 'uploads/pdfs')));
+
 // Serve static files (JS, CSS, assets)
 app.use(express.static(clientDistPath));
 log(`ℹ React frontend will be served from ${clientDistPath}`);

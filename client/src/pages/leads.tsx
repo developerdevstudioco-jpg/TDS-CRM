@@ -209,11 +209,15 @@ function InlineAssignedCell({ lead, users, onUpdate }: {
 
 
 // Replaces variables in template content with lead data
-function fillTemplate(content: string, lead: LeadWithUser): string {
-  return content
+function fillTemplate(content: string, lead: LeadWithUser, pdfUrl?: string | null): string {
+  let msg = content
     .replace(/\{\{name\}\}/g, lead.name || '')
     .replace(/\{\{company\}\}/g, lead.company || '')
     .replace(/\{\{status\}\}/g, lead.status || '');
+  if (pdfUrl) {
+    msg += `\n\n📄 Document: ${pdfUrl}`;
+  }
+  return msg;
 }
 
 function MessagePickerDialog({ lead, type, onClose, onSent }: {
@@ -234,8 +238,8 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
     if (id === 'custom') {
       setPreviewMessage(customMessage);
     } else {
-      const template = templates?.find(t => t.id === id);
-      if (template) setPreviewMessage(fillTemplate(template.content, lead));
+      const template = templates?.find(t => t.id === id) as any;
+      if (template) setPreviewMessage(fillTemplate(template.content, lead, template.pdfUrl));
     }
   };
 
@@ -256,17 +260,19 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] bg-card border-white/10">
-        <DialogHeader>
-          <DialogTitle className="font-display flex items-center gap-2">
-            {isWhatsApp
-              ? <><MessageCircle className="h-5 w-5 text-green-400" /> Send WhatsApp</>
-              : <><MessageSquare className="h-5 w-5 text-blue-400" /> Send SMS</>
-            }
-          </DialogTitle>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[480px] bg-card border-white/10 flex flex-col max-h-[90vh] overflow-hidden p-0">
+        <div className="px-6 pt-6 pb-4 border-b border-white/8 shrink-0">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              {isWhatsApp
+                ? <><MessageCircle className="h-5 w-5 text-green-400" /> Send WhatsApp</>
+                : <><MessageSquare className="h-5 w-5 text-blue-400" /> Send SMS</>
+              }
+            </DialogTitle>
+          </DialogHeader>
+        </div>
 
-        <div className="space-y-4 py-2">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {/* To */}
           <div className="flex items-center gap-2 text-sm text-muted-foreground bg-white/5 rounded-xl px-4 py-2.5 border border-white/8">
             <span className="font-medium text-foreground">To:</span>
@@ -311,6 +317,9 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
                     <div className="flex items-center gap-2">
                       <MessageSquareText className="h-4 w-4 shrink-0" />
                       <span className="text-sm font-medium">{template.name}</span>
+                      {(template as any).pdfUrl && (
+                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-400/10 text-red-400 border border-red-400/20">PDF</span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 ml-6 line-clamp-1">{template.content}</p>
                   </button>
@@ -347,7 +356,8 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
           )}
         </div>
 
-        <DialogFooter className="gap-2">
+        </div>
+        <div className="px-6 py-4 border-t border-white/8 shrink-0 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancel</Button>
           <Button
             onClick={handleSend}
@@ -363,7 +373,7 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
             <Send className="h-4 w-4 mr-2" />
             {isWhatsApp ? 'Send via WhatsApp' : 'Send via SMS'}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

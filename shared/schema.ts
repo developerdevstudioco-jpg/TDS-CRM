@@ -7,8 +7,8 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default('user'), // 'admin' | 'manager' | 'user'
-  managerId: integer("manager_id"), // which manager this user belongs to
+  role: text("role").notNull().default('user'),
+  managerId: integer("manager_id"),
 });
 
 export const leads = pgTable("leads", {
@@ -27,7 +27,7 @@ export const leadActivities = pgTable("lead_activities", {
   id: serial("id").primaryKey(),
   leadId: integer("lead_id").notNull().references(() => leads.id, { onDelete: 'cascade' }),
   userId: integer("user_id").references(() => users.id),
-  type: text("type").notNull(), // 'status_change' | 'note' | 'created' | 'call' | 'whatsapp' | 'sms' | 'follow_up_set'
+  type: text("type").notNull(),
   content: text("content"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -36,6 +36,8 @@ export const templates = pgTable("templates", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   content: text("content").notNull(),
+  pdfUrl: text("pdf_url"),       // stored PDF file path
+  pdfName: text("pdf_name"),     // original PDF filename
 });
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -78,7 +80,6 @@ export type InsertTemplate = z.infer<typeof insertTemplateSchema>;
 export type LeadActivity = typeof leadActivities.$inferSelect;
 export type InsertLeadActivity = z.infer<typeof insertLeadActivitySchema>;
 
-// API Request/Response
 export type CreateLeadRequest = InsertLead;
 export type UpdateLeadRequest = Partial<InsertLead>;
 export type LeadResponse = Lead;
