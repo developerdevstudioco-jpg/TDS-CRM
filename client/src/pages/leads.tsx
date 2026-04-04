@@ -355,8 +355,6 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
             </div>
           )}
         </div>
-
-        </div>
         <div className="px-6 py-4 border-t border-white/8 shrink-0 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancel</Button>
           <Button
