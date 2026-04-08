@@ -374,6 +374,116 @@ export async function registerRoutes(
     }
   });
 
+// ─── ADD THESE TWO ROUTES inside registerRoutes(), after the existing /api/reports/user/:id route ───
+
+// Returns leads that a user had activity on within the period, with their recent activities
+app.get('/api/reports/user/:id/leads', requireAuth, async (req, res) => {
+  try {
+    const currentUser = req.user as any;
+    const targetId = Number(req.params.id);
+
+    // Auth check: managers can only view their assigned users
+    if (currentUser.role === 'manager') {
+      const myUsers = await storage.getUsersByManager(currentUser.id);
+      const allowed = myUsers.some((u: any) => u.id === targetId);
+      if (!allowed) return res.status(403).json({ message: "Not authorized" });
+    } else if (currentUser.role !== 'admin') {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+
+    const { period } = req.query;
+    const { from, to } = getDateRange(period as string);
+
+    // Get all activities by this user in the period
+    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
+
+    // Group by leadId
+    const leadMap = new Map<number, any[]>();
+    for (const act of activities) {
+      if (!leadMap.has(act.leadId)) leadMap.set(act.leadId, []);
+      leadMap.get(act.leadId)!.push(act);
+    }
+
+    // Fetch each lead and attach its activities
+    const result = [];
+    for (const [leadId, acts] of leadMap) {
+      const lead = await storage.getLead(leadId);
+      if (!lead) continue;
+      result.push({
+        ...lead,
+        activityCount: acts.length,
+        recentActivities: acts
+          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 3),
+      });
+    }
+
+    // Sort by most recent activity first
+    result.sort((a, b) => {
+      const aTime = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
+      const bTime = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
+      return bTime - aTime;
+    });
+
+    res.status(200).json(result);
+  } catch (err: any) {
+    console.error("user leads error:", err);
+    return res.status(500).json({ message: err?.message || String(err) });
+  }
+});
+
+// Returns individual activity records for a user filtered by type and period (for My Report drill-down)
+app.get('/api/reports/activities', requireAuth, async (req, res) => {
+  try {
+    const currentUser = req.user as any;
+    const { period, type, userId: queryUserId } = req.query;
+
+    let targetId = currentUser.id;
+
+    // If a userId is specified, check authorization
+    if (queryUserId) {
+      targetId = Number(queryUserId);
+      if (currentUser.role === 'manager') {
+        const myUsers = await storage.getUsersByManager(currentUser.id);
+        const allowed = myUsers.some((u: any) => u.id === targetId);
+        if (!allowed) return res.status(403).json({ message: "Not authorized" });
+      } else if (currentUser.role !== 'admin' && targetId !== currentUser.id) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+    }
+
+    const { from, to } = getDateRange(period as string);
+    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
+
+    // Filter by type if provided
+    const filtered = type
+      ? activities.filter((a: any) => a.type === type)
+      : activities;
+
+    // Enrich with lead info
+    const enriched = await Promise.all(
+      filtered.map(async (act: any) => {
+        const lead = await storage.getLead(act.leadId);
+        return {
+          ...act,
+          leadName: lead?.name ?? 'Unknown',
+          leadCompany: lead?.company ?? null,
+          leadMobile: lead?.mobile ?? null,
+          leadStatus: lead?.status ?? null,
+        };
+      })
+    );
+
+    // Sort newest first
+    enriched.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.status(200).json(enriched);
+  } catch (err: any) {
+    console.error("activities error:", err);
+    return res.status(500).json({ message: err?.message || String(err) });
+  }
+});
+
   app.get('/api/reports/my-users', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;

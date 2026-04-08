@@ -37,3 +37,35 @@ export function useMyUsers() {
     },
   });
 }
+
+// ─── ADD THESE to your existing use-reports.ts hook file ───
+// (keep all existing exports, just add these two new hooks)
+
+// Fetches leads worked by a specific user in a period (for Dashboard Team Activity)
+export function useUserLeads(userId: number | null, period: ReportPeriod) {
+  return useQuery({
+    queryKey: ['/api/reports/user', userId, 'leads', period],
+    queryFn: async () => {
+      if (!userId) return [];
+      const res = await fetch(`/api/reports/user/${userId}/leads?period=${period}`);
+      if (!res.ok) throw new Error('Failed to fetch user leads');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
+}
+
+// Fetches individual activity records filtered by type (for My Report drill-down)
+export function useActivityList(userId: number | null, activityType: string, period: ReportPeriod) {
+  return useQuery({
+    queryKey: ['/api/reports/activities', userId, activityType, period],
+    queryFn: async () => {
+      const params = new URLSearchParams({ period, type: activityType });
+      if (userId) params.set('userId', String(userId));
+      const res = await fetch(`/api/reports/activities?${params}`);
+      if (!res.ok) throw new Error('Failed to fetch activities');
+      return res.json();
+    },
+    enabled: !!activityType,
+  });
+}

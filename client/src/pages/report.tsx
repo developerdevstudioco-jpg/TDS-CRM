@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useMyReport, useUserReport, useMyUsers, type ReportPeriod } from "@/hooks/use-reports";
+import { useMyReport, useUserReport, useMyUsers, useActivityList, type ReportPeriod } from "@/hooks/use-reports";
 import { useAuth } from "@/hooks/use-auth";
 import {
   Phone, MessageCircle, MessageSquare, Plus, ArrowRightLeft,
-  StickyNote, CalendarClock, Activity, Loader2, TrendingUp, Users
+  StickyNote, CalendarClock, Activity, Loader2, TrendingUp, Users,
+  ChevronDown, ChevronRight, X
 } from "lucide-react";
 
 type Period = { label: string; value: ReportPeriod };
@@ -14,17 +15,112 @@ const PERIODS: Period[] = [
   { label: "This Month", value: "month" },
 ];
 
-function StatGrid({ summary, isLoading }: { summary: any; isLoading: boolean }) {
-  const stats = [
-    { label: "Calls Made", value: summary?.calls ?? 0, icon: Phone, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
-    { label: "WhatsApp Sent", value: summary?.whatsapp ?? 0, icon: MessageCircle, color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/20" },
-    { label: "SMS Sent", value: summary?.sms ?? 0, icon: MessageSquare, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
-    { label: "Leads Created", value: summary?.leadsCreated ?? 0, icon: Plus, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
-    { label: "Status Changes", value: summary?.statusChanges ?? 0, icon: ArrowRightLeft, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20" },
-    { label: "Notes Added", value: summary?.notesAdded ?? 0, icon: StickyNote, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
-    { label: "Follow-ups Set", value: summary?.followUpsSet ?? 0, icon: CalendarClock, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20" },
-  ];
+type StatKey = 'calls' | 'whatsapp' | 'sms' | 'leadsCreated' | 'statusChanges' | 'notesAdded' | 'followUpsSet';
 
+const STAT_DEFS: Array<{
+  key: StatKey;
+  label: string;
+  icon: any;
+  color: string;
+  bg: string;
+  border: string;
+  activityType: string;
+}> = [
+  { key: 'calls', label: "Calls Made", icon: Phone, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", activityType: 'call' },
+  { key: 'whatsapp', label: "WhatsApp Sent", icon: MessageCircle, color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/20", activityType: 'whatsapp' },
+  { key: 'sms', label: "SMS Sent", icon: MessageSquare, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", activityType: 'sms' },
+  { key: 'leadsCreated', label: "Leads Created", icon: Plus, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20", activityType: 'created' },
+  { key: 'statusChanges', label: "Status Changes", icon: ArrowRightLeft, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", activityType: 'status_change' },
+  { key: 'notesAdded', label: "Notes Added", icon: StickyNote, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", activityType: 'note' },
+  { key: 'followUpsSet', label: "Follow-ups Set", icon: CalendarClock, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20", activityType: 'followup' },
+];
+
+function ActivityList({ userId, activityType, period, color, label, onClose }: {
+  userId: number | null;
+  activityType: string;
+  period: ReportPeriod;
+  color: string;
+  label: string;
+  onClose: () => void;
+}) {
+  const { data: activities, isLoading } = useActivityList(userId, activityType, period);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+
+  return (
+    <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-white/5 flex items-center justify-between">
+        <span className={`text-sm font-medium ${color}`}>{label}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {isLoading ? "..." : `${activities?.length ?? 0} records`}
+          </span>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
+      ) : !activities || activities.length === 0 ? (
+        <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+          No {label.toLowerCase()} in this period
+        </div>
+      ) : (
+        <div className="divide-y divide-white/5">
+          {activities.map((item: any) => (
+            <div key={item.id}>
+              <button
+                onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-white/[0.03] transition-colors"
+              >
+                {expandedId === item.id
+                  ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                }
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-foreground truncate block">
+                    {item.leadName || "Unknown Lead"}
+                  </span>
+                  {item.leadCompany && (
+                    <span className="text-xs text-muted-foreground">{item.leadCompany}</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground flex-shrink-0">
+                  {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </button>
+
+              {expandedId === item.id && (
+                <div className="px-5 pb-4 pt-2 bg-white/[0.02] border-t border-white/5">
+                  {item.content && (
+                    <p className="text-sm text-muted-foreground">{item.content}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground/60">
+                    {item.leadMobile && <span>{item.leadMobile}</span>}
+                    {item.leadStatus && (
+                      <span className="capitalize">Status: {item.leadStatus}</span>
+                    )}
+                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatGrid({ summary, isLoading, onStatClick, activeStatKey }: {
+  summary: any;
+  isLoading: boolean;
+  onStatClick: (key: StatKey) => void;
+  activeStatKey: StatKey | null;
+}) {
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-muted-foreground" /></div>;
 
   return (
@@ -42,19 +138,30 @@ function StatGrid({ summary, isLoading }: { summary: any; isLoading: boolean }) 
         </div>
       )}
 
-      {/* Stats grid */}
+      {/* Clickable stats grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {stats.map((stat) => (
-          <div key={stat.label} className={`rounded-2xl border ${stat.border} ${stat.bg} p-5 flex flex-col gap-3`}>
-            <div className={`h-9 w-9 rounded-xl ${stat.bg} border ${stat.border} flex items-center justify-center`}>
-              <stat.icon className={`h-4 w-4 ${stat.color}`} />
-            </div>
-            <div>
-              <p className={`text-3xl font-display font-bold ${stat.color}`}>{stat.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-            </div>
-          </div>
-        ))}
+        {STAT_DEFS.map((stat) => {
+          const isActive = activeStatKey === stat.key;
+          return (
+            <button
+              key={stat.key}
+              onClick={() => onStatClick(stat.key)}
+              className={`rounded-2xl border ${stat.border} ${stat.bg} p-5 flex flex-col gap-3 text-left transition-all duration-200 ${
+                isActive
+                  ? 'ring-2 ring-offset-2 ring-offset-background ' + stat.border.replace('border-', 'ring-')
+                  : 'hover:brightness-125'
+              }`}
+            >
+              <div className={`h-9 w-9 rounded-xl ${stat.bg} border ${stat.border} flex items-center justify-center`}>
+                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              </div>
+              <div>
+                <p className={`text-3xl font-display font-bold ${stat.color}`}>{summary?.[stat.key] ?? 0}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {/* Breakdown bar */}
@@ -62,16 +169,16 @@ function StatGrid({ summary, isLoading }: { summary: any; isLoading: boolean }) 
         <div className="rounded-2xl border border-white/8 bg-card p-6 space-y-4">
           <h2 className="font-display font-semibold text-sm text-muted-foreground uppercase tracking-wider">Activity Breakdown</h2>
           <div className="space-y-3">
-            {stats.map((stat) => (
-              <div key={stat.label} className="flex items-center gap-3">
+            {STAT_DEFS.map((stat) => (
+              <div key={stat.key} className="flex items-center gap-3">
                 <div className="w-32 text-xs text-muted-foreground shrink-0">{stat.label}</div>
                 <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${stat.bg.replace('/10', '/60')}`}
-                    style={{ width: summary.total > 0 ? `${(stat.value / summary.total) * 100}%` : '0%' }}
+                    style={{ width: summary.total > 0 ? `${((summary[stat.key] ?? 0) / summary.total) * 100}%` : '0%' }}
                   />
                 </div>
-                <div className={`text-sm font-semibold ${stat.color} w-8 text-right`}>{stat.value}</div>
+                <div className={`text-sm font-semibold ${stat.color} w-8 text-right`}>{summary?.[stat.key] ?? 0}</div>
               </div>
             ))}
           </div>
@@ -83,13 +190,48 @@ function StatGrid({ summary, isLoading }: { summary: any; isLoading: boolean }) 
 
 function MyReportTab({ period }: { period: ReportPeriod }) {
   const { data: summary, isLoading } = useMyReport(period);
-  return <StatGrid summary={summary} isLoading={isLoading} />;
+  const { user } = useAuth();
+  const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
+
+  const handleStatClick = (key: StatKey) => {
+    setActiveStatKey(prev => prev === key ? null : key);
+  };
+
+  const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
+
+  return (
+    <div className="space-y-5">
+      <StatGrid
+        summary={summary}
+        isLoading={isLoading}
+        onStatClick={handleStatClick}
+        activeStatKey={activeStatKey}
+      />
+      {activeStatKey && activeStat && (
+        <ActivityList
+          userId={user?.id ?? null}
+          activityType={activeStat.activityType}
+          period={period}
+          color={activeStat.color}
+          label={activeStat.label}
+          onClose={() => setActiveStatKey(null)}
+        />
+      )}
+    </div>
+  );
 }
 
 function UserReportTab({ period }: { period: ReportPeriod }) {
   const { data: myUsers, isLoading: usersLoading } = useMyUsers();
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
   const { data: summary, isLoading: reportLoading } = useUserReport(selectedUserId, period);
+
+  const handleStatClick = (key: StatKey) => {
+    setActiveStatKey(prev => prev === key ? null : key);
+  };
+
+  const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
 
   if (usersLoading) return <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-muted-foreground" /></div>;
 
@@ -107,7 +249,10 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
             {teamUsers.map((u) => (
               <button
                 key={u.id}
-                onClick={() => setSelectedUserId(u.id === selectedUserId ? null : u.id)}
+                onClick={() => {
+                  setSelectedUserId(u.id === selectedUserId ? null : u.id);
+                  setActiveStatKey(null);
+                }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all duration-200 ${
                   selectedUserId === u.id
                     ? 'bg-primary/10 border-primary/30 text-primary'
@@ -124,9 +269,25 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
         )}
       </div>
 
-      {/* Selected user report */}
       {selectedUserId ? (
-        <StatGrid summary={summary} isLoading={reportLoading} />
+        <>
+          <StatGrid
+            summary={summary}
+            isLoading={reportLoading}
+            onStatClick={handleStatClick}
+            activeStatKey={activeStatKey}
+          />
+          {activeStatKey && activeStat && (
+            <ActivityList
+              userId={selectedUserId}
+              activityType={activeStat.activityType}
+              period={period}
+              color={activeStat.color}
+              label={activeStat.label}
+              onClose={() => setActiveStatKey(null)}
+            />
+          )}
+        </>
       ) : (
         <div className="text-center py-12 text-muted-foreground text-sm rounded-2xl border border-white/8 bg-card">
           <Users className="h-10 w-10 mx-auto mb-3 opacity-20" />

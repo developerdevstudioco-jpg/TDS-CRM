@@ -43,6 +43,7 @@ export interface IStorage {
   // Lead Activities
   getLeadActivities(leadId: number): Promise<LeadActivityWithUser[]>;
   createLeadActivity(activity: InsertLeadActivity): Promise<LeadActivity>;
+  getActivitiesByUserInRange(userId: number, from: Date, to: Date): Promise<LeadActivity[]>;
 
   // Reports
   getActivitySummary(userId: number, from: Date, to: Date): Promise<ActivitySummary>;
@@ -162,7 +163,22 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  // Reports — get activity summary for a user within a date range
+  // ✅ NEW METHOD ADDED
+  async getActivitiesByUserInRange(userId: number, from: Date, to: Date): Promise<LeadActivity[]> {
+    return await db
+      .select()
+      .from(leadActivities)
+      .where(
+        and(
+          eq(leadActivities.userId, userId),
+          gte(leadActivities.createdAt, from),
+          lt(leadActivities.createdAt, to)
+        )
+      )
+      .orderBy(desc(leadActivities.createdAt));
+  }
+
+  // Reports
   async getActivitySummary(userId: number, from: Date, to: Date): Promise<ActivitySummary> {
     const activities = await db
       .select({ type: leadActivities.type })

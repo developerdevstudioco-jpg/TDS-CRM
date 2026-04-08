@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useLeads } from "@/hooks/use-leads";
 import { useAuth } from "@/hooks/use-auth";
-import { useMyUsers, useUserReport, type ReportPeriod } from "@/hooks/use-reports";
+import { useMyUsers, useUserReport, useUserLeads, type ReportPeriod } from "@/hooks/use-reports";
 import { useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Users, Target, CheckCircle2, AlertCircle, Loader2,
   CalendarClock, CalendarCheck, CalendarX, TrendingUp, ArrowUpRight,
-  Phone, MessageCircle, MessageSquare, Plus, ArrowRightLeft, StickyNote, Activity
+  Phone, MessageCircle, MessageSquare, Plus, ArrowRightLeft, StickyNote, Activity,
+  ChevronDown, ChevronRight, User
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell } from "recharts";
 
@@ -24,8 +24,22 @@ const PERIODS: Period[] = [
   { label: "This Month", value: "month" },
 ];
 
+function statusColor(status: string) {
+  switch (status) {
+    case 'Open': return 'bg-orange-400/10 text-orange-400';
+    case 'Warm': return 'bg-amber-400/10 text-amber-400';
+    case 'Converted': return 'bg-emerald-400/10 text-emerald-400';
+    case 'Will Convert': return 'bg-purple-400/10 text-purple-400';
+    case 'Cold': return 'bg-blue-400/10 text-blue-400';
+    case 'Not Interested': return 'bg-red-400/10 text-red-400';
+    default: return 'bg-white/10 text-muted-foreground';
+  }
+}
+
 function UserActivityPanel({ userId, period }: { userId: number; period: ReportPeriod }) {
   const { data: summary, isLoading } = useUserReport(userId, period);
+  const { data: userLeads, isLoading: leadsLoading } = useUserLeads(userId, period);
+  const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
 
   const stats = [
     { label: "Calls", value: summary?.calls ?? 0, icon: Phone, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
@@ -41,16 +55,108 @@ function UserActivityPanel({ userId, period }: { userId: number; period: ReportP
   if (isLoading) return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      {stats.map((stat) => (
-        <div key={stat.label} className={`rounded-xl border ${stat.border} ${stat.bg} p-4`}>
-          <div className="flex items-center gap-2 mb-2">
-            <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
-            <span className="text-xs text-muted-foreground">{stat.label}</span>
+    <div className="space-y-5">
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {stats.map((stat) => (
+          <div key={stat.label} className={`rounded-xl border ${stat.border} ${stat.bg} p-4`}>
+            <div className="flex items-center gap-2 mb-2">
+              <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
+              <span className="text-xs text-muted-foreground">{stat.label}</span>
+            </div>
+            <p className={`text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
           </div>
-          <p className={`text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+        ))}
+      </div>
+
+      {/* Leads worked list */}
+      <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">Leads Worked</span>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {leadsLoading ? "..." : `${userLeads?.length ?? 0} leads`}
+          </span>
         </div>
-      ))}
+
+        {leadsLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : !userLeads || userLeads.length === 0 ? (
+          <div className="px-5 py-6 text-center text-sm text-muted-foreground">
+            No leads worked in this period
+          </div>
+        ) : (
+          <div className="divide-y divide-white/5">
+            {userLeads.map((lead: any) => (
+              <div key={lead.id}>
+                <button
+                  onClick={() => setExpandedLeadId(expandedLeadId === lead.id ? null : lead.id)}
+                  className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-white/[0.03] transition-colors"
+                >
+                  {expandedLeadId === lead.id
+                    ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                    : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                  }
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-foreground truncate block">{lead.name}</span>
+                    {lead.company && <span className="text-xs text-muted-foreground">{lead.company}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(lead.status)}`}>
+                      {lead.status}
+                    </span>
+                    {lead.activityCount > 0 && (
+                      <span className="text-xs text-muted-foreground">{lead.activityCount} activities</span>
+                    )}
+                  </div>
+                </button>
+
+                {expandedLeadId === lead.id && (
+                  <div className="px-5 pb-4 bg-white/[0.02] border-t border-white/5">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-3">
+                      {lead.mobile && (
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <Phone className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-muted-foreground">{lead.mobile}</span>
+                        </div>
+                      )}
+                      {lead.email && (
+                        <div className="text-xs text-muted-foreground truncate">{lead.email}</div>
+                      )}
+                      {lead.followUpDate && (
+                        <div className="flex items-center gap-1.5 text-xs col-span-2">
+                          <CalendarClock className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-muted-foreground">
+                            Follow-up: {new Date(lead.followUpDate).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {lead.recentActivities && lead.recentActivities.length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Recent activity</p>
+                        {lead.recentActivities.slice(0, 3).map((act: any) => (
+                          <div key={act.id} className="flex items-start gap-2 text-xs text-muted-foreground">
+                            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0" />
+                            <span className="flex-1">{act.content}</span>
+                            <span className="flex-shrink-0 text-[10px] opacity-60">
+                              {new Date(act.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -209,17 +315,15 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Manager: User Activity Section */}
+      {/* Manager: Team Activity Section */}
       {isManagerOrAdmin && myUsers && myUsers.length > 0 && (
         <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
           <div className="px-6 py-5 border-b border-white/5">
             <h2 className="font-display font-semibold text-foreground">Team Activity</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">View activity for your team members</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Click a team member to view their stats and leads</p>
           </div>
           <div className="p-6 space-y-5">
-            {/* User selector + period filter */}
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* User pills */}
               <div className="flex flex-wrap gap-2 flex-1">
                 {myUsers.filter(u => u.id !== (user?.id)).map((u) => (
                   <button
@@ -240,7 +344,6 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              {/* Period filter */}
               <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1 self-start">
                 {PERIODS.map((p) => (
                   <button
@@ -258,12 +361,11 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Activity display */}
             {selectedUserId ? (
               <UserActivityPanel userId={selectedUserId} period={reportPeriod} />
             ) : (
               <div className="text-center py-8 text-muted-foreground text-sm">
-                Select a team member above to view their activity
+                Select a team member above to view their activity and leads
               </div>
             )}
           </div>
