@@ -140,6 +140,29 @@ export async function registerRoutes(
     const leads = await storage.getLeads(options);
     res.status(200).json(leads);
   });
+  
+  // ─── ADD THIS ROUTE HERE ───
+app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
+  try {
+    const targetId = Number(req.params.id);
+    const currentUser = req.user as any;
+
+    // Managers can only view users assigned to them
+    if (currentUser.role === 'manager') {
+      const myUsers = await storage.getUsersByManager(currentUser.id);
+      const allowed = myUsers.some((u: any) => u.id === targetId);
+      if (!allowed) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+    }
+
+    const leads = await storage.getLeads({ assignedTo: targetId });
+    res.status(200).json(leads);
+  } catch (err: any) {
+    console.error("user leads route error:", err);
+    return res.status(500).json({ message: err?.message || String(err) });
+  }
+});
 
   // Bulk update leads
   app.post(api.leads.bulkUpdate.path, requireAuth, async (req, res) => {

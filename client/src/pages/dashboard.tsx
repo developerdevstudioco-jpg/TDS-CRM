@@ -1,20 +1,28 @@
 import { useState } from "react";
 import { useLeads } from "@/hooks/use-leads";
 import { useAuth } from "@/hooks/use-auth";
-import { useMyUsers, useUserReport, useUserLeads, type ReportPeriod } from "@/hooks/use-reports";
+import { useMyUsers, useUserReport, type ReportPeriod } from "@/hooks/use-reports";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   Users, Target, CheckCircle2, AlertCircle, Loader2,
-  CalendarClock, CalendarCheck, CalendarX, TrendingUp, ArrowUpRight,
+  CalendarClock, CalendarCheck, CalendarX, TrendingUp, ArrowUpRight, ArrowLeft,
   Phone, MessageCircle, MessageSquare, Plus, ArrowRightLeft, StickyNote, Activity,
-  ChevronDown, ChevronRight, User
+  ChevronLeft
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Cell } from "recharts";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
+  Tooltip as RechartsTooltip, Cell
+} from "recharts";
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function getToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
 function getTomorrow() { const d = getToday(); d.setDate(d.getDate() + 1); return d; }
 function isSameDay(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
 }
 
 type Period = { label: string; value: ReportPeriod };
@@ -24,142 +32,241 @@ const PERIODS: Period[] = [
   { label: "This Month", value: "month" },
 ];
 
-function statusColor(status: string) {
-  switch (status) {
-    case 'Open': return 'bg-orange-400/10 text-orange-400';
-    case 'Warm': return 'bg-amber-400/10 text-amber-400';
-    case 'Converted': return 'bg-emerald-400/10 text-emerald-400';
-    case 'Will Convert': return 'bg-purple-400/10 text-purple-400';
-    case 'Cold': return 'bg-blue-400/10 text-blue-400';
-    case 'Not Interested': return 'bg-red-400/10 text-red-400';
-    default: return 'bg-white/10 text-muted-foreground';
-  }
+// ─── Hook: leads for a specific user (manager view) ────────────────────────────
+
+function useUserLeadsForDashboard(userId: number | null) {
+  return useQuery({
+    queryKey: ['/api/leads/user', userId],
+    queryFn: async () => {
+      const res = await fetch(`/api/leads/user/${userId}`);
+      if (!res.ok) throw new Error('Failed to fetch user leads');
+      return res.json();
+    },
+    enabled: !!userId,
+  });
 }
 
-function UserActivityPanel({ userId, period }: { userId: number; period: ReportPeriod }) {
+// ─── Shared StatCard ───────────────────────────────────────────────────────────
+
+function StatCard({
+  title, value, icon: Icon, color, bg, border, onClick
+}: {
+  title: string; value: number; icon: any;
+  color: string; bg: string; border: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button onClick={onClick} className="text-left w-full group" disabled={!onClick}>
+      <div className={`relative rounded-2xl p-5 border ${border} ${bg} transition-all duration-300 ${onClick ? 'hover:-translate-y-1 hover:shadow-lg hover:shadow-black/30 cursor-pointer' : 'cursor-default'} overflow-hidden`}>
+        <div className="flex items-center justify-between mb-4">
+          <div className={`h-9 w-9 rounded-xl ${bg} border ${border} flex items-center justify-center`}>
+            <Icon className={`h-4 w-4 ${color}`} />
+          </div>
+          {onClick && <ArrowUpRight className={`h-4 w-4 ${color} opacity-0 group-hover:opacity-100 transition-opacity`} />}
+        </div>
+        <div className={`text-3xl font-display font-bold ${color}`}>{value}</div>
+        <p className="text-xs text-muted-foreground mt-1 font-medium">{title}</p>
+      </div>
+    </button>
+  );
+}
+
+// ─── Custom Tooltip ────────────────────────────────────────────────────────────
+
+function CustomTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-card border border-white/10 rounded-xl px-4 py-3 shadow-xl">
+        <p className="text-xs text-muted-foreground mb-1">{label}</p>
+        <p className="text-lg font-bold text-foreground">
+          {payload[0].value} <span className="text-xs font-normal text-muted-foreground">leads</span>
+        </p>
+      </div>
+    );
+  }
+  return null;
+}
+
+// ─── Activity Stats Panel (compact, no click) ──────────────────────────────────
+
+function ActivityStatsPanel({ userId, period }: { userId: number; period: ReportPeriod }) {
   const { data: summary, isLoading } = useUserReport(userId, period);
-  const { data: userLeads, isLoading: leadsLoading } = useUserLeads(userId, period);
-  const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
 
   const stats = [
     { label: "Calls", value: summary?.calls ?? 0, icon: Phone, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
     { label: "WhatsApp", value: summary?.whatsapp ?? 0, icon: MessageCircle, color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/20" },
     { label: "SMS", value: summary?.sms ?? 0, icon: MessageSquare, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
-    { label: "Leads", value: summary?.leadsCreated ?? 0, icon: Plus, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
+    { label: "Leads Created", value: summary?.leadsCreated ?? 0, icon: Plus, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
     { label: "Status Changes", value: summary?.statusChanges ?? 0, icon: ArrowRightLeft, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20" },
     { label: "Notes", value: summary?.notesAdded ?? 0, icon: StickyNote, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
     { label: "Follow-ups", value: summary?.followUpsSet ?? 0, icon: CalendarClock, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20" },
     { label: "Total", value: summary?.total ?? 0, icon: Activity, color: "text-primary", bg: "bg-primary/10", border: "border-primary/20" },
   ];
 
-  if (isLoading) return <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+  if (isLoading) return <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
 
   return (
-    <div className="space-y-5">
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {stats.map((stat) => (
-          <div key={stat.label} className={`rounded-xl border ${stat.border} ${stat.bg} p-4`}>
-            <div className="flex items-center gap-2 mb-2">
-              <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
-              <span className="text-xs text-muted-foreground">{stat.label}</span>
-            </div>
-            <p className={`text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {stats.map((stat) => (
+        <div key={stat.label} className={`rounded-xl border ${stat.border} ${stat.bg} p-4`}>
+          <div className="flex items-center gap-2 mb-2">
+            <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
+            <span className="text-xs text-muted-foreground">{stat.label}</span>
           </div>
-        ))}
+          <p className={`text-2xl font-display font-bold ${stat.color}`}>{stat.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Full User Dashboard (shown when manager clicks a user) ────────────────────
+
+function UserDashboard({
+  userId,
+  username,
+  period,
+  onBack,
+}: {
+  userId: number;
+  username: string;
+  period: ReportPeriod;
+  onBack: () => void;
+}) {
+  const { data: leads, isLoading } = useUserLeadsForDashboard(userId);
+
+  const today = getToday();
+  const tomorrow = getTomorrow();
+
+  const stats = {
+    total: leads?.length || 0,
+    open: leads?.filter((l: any) => l.status === 'Open').length || 0,
+    warm: leads?.filter((l: any) => l.status === 'Warm').length || 0,
+    converted: leads?.filter((l: any) => l.status === 'Converted').length || 0,
+    willRegister: leads?.filter((l: any) => l.status === 'Will Convert').length || 0,
+    todayFollowup: leads?.filter((l: any) => l.followUpDate && isSameDay(new Date(l.followUpDate), today)).length || 0,
+    tomorrowFollowup: leads?.filter((l: any) => l.followUpDate && isSameDay(new Date(l.followUpDate), tomorrow)).length || 0,
+    overdue: leads?.filter((l: any) => {
+      if (!l.followUpDate) return false;
+      const d = new Date(l.followUpDate); d.setHours(0, 0, 0, 0);
+      return d < today;
+    }).length || 0,
+  };
+
+  const leadSummaryCards = [
+    { title: "Total Leads", value: stats.total, icon: Users, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
+    { title: "Open Leads", value: stats.open, icon: AlertCircle, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
+    { title: "Warm Leads", value: stats.warm, icon: Target, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20" },
+    { title: "Converted", value: stats.converted, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
+  ];
+
+  const followupCards = [
+    { title: "Will Register", value: stats.willRegister, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
+    { title: "Today Follow-up", value: stats.todayFollowup, icon: CalendarCheck, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20" },
+    { title: "Tomorrow", value: stats.tomorrowFollowup, icon: CalendarClock, color: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/20" },
+    { title: "Overdue", value: stats.overdue, icon: CalendarX, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20" },
+  ];
+
+  const chartData = [
+    { name: 'Open', value: stats.open, color: '#60a5fa' },
+    { name: 'Warm', value: stats.warm, color: '#fbbf24' },
+    { name: 'Will Convert', value: stats.willRegister, color: '#a78bfa' },
+    { name: 'Converted', value: stats.converted, color: '#34d399' },
+    { name: 'Not Interested', value: leads?.filter((l: any) => l.status === 'Not Interested').length || 0, color: '#f87171' },
+    { name: 'Cold', value: leads?.filter((l: any) => l.status === 'Cold').length || 0, color: '#94a3b8' },
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="h-7 w-7 animate-spin text-primary/50" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      {/* User header + back */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Back
+        </button>
+        <div className="h-4 w-px bg-white/10" />
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center text-[11px] font-bold text-primary">
+            {username.substring(0, 1).toUpperCase()}
+          </div>
+          <span className="text-sm font-medium text-foreground">{username}</span>
+          <span className="text-xs text-muted-foreground">— dashboard view</span>
+        </div>
       </div>
 
-      {/* Leads worked list */}
-      <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm font-medium text-foreground">Leads Worked</span>
-          </div>
-          <span className="text-xs text-muted-foreground">
-            {leadsLoading ? "..." : `${userLeads?.length ?? 0} leads`}
-          </span>
+      {/* Lead Summary */}
+      <div>
+        <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Lead Summary</p>
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+          {leadSummaryCards.map((card) => (
+            <StatCard key={card.title} {...card} />
+          ))}
         </div>
+      </div>
 
-        {leadsLoading ? (
-          <div className="flex justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : !userLeads || userLeads.length === 0 ? (
-          <div className="px-5 py-6 text-center text-sm text-muted-foreground">
-            No leads worked in this period
-          </div>
-        ) : (
-          <div className="divide-y divide-white/5">
-            {userLeads.map((lead: any) => (
-              <div key={lead.id}>
-                <button
-                  onClick={() => setExpandedLeadId(expandedLeadId === lead.id ? null : lead.id)}
-                  className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-white/[0.03] transition-colors"
-                >
-                  {expandedLeadId === lead.id
-                    ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                    : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                  }
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-foreground truncate block">{lead.name}</span>
-                    {lead.company && <span className="text-xs text-muted-foreground">{lead.company}</span>}
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(lead.status)}`}>
-                      {lead.status}
-                    </span>
-                    {lead.activityCount > 0 && (
-                      <span className="text-xs text-muted-foreground">{lead.activityCount} activities</span>
-                    )}
-                  </div>
-                </button>
+      {/* Follow-up Summary */}
+      <div>
+        <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Follow-up Summary</p>
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+          {followupCards.map((card) => (
+            <StatCard key={card.title} {...card} />
+          ))}
+        </div>
+      </div>
 
-                {expandedLeadId === lead.id && (
-                  <div className="px-5 pb-4 bg-white/[0.02] border-t border-white/5">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-3">
-                      {lead.mobile && (
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <Phone className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-muted-foreground">{lead.mobile}</span>
-                        </div>
-                      )}
-                      {lead.email && (
-                        <div className="text-xs text-muted-foreground truncate">{lead.email}</div>
-                      )}
-                      {lead.followUpDate && (
-                        <div className="flex items-center gap-1.5 text-xs col-span-2">
-                          <CalendarClock className="h-3 w-3 text-muted-foreground" />
-                          <span className="text-muted-foreground">
-                            Follow-up: {new Date(lead.followUpDate).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    {lead.recentActivities && lead.recentActivities.length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        <p className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Recent activity</p>
-                        {lead.recentActivities.slice(0, 3).map((act: any) => (
-                          <div key={act.id} className="flex items-start gap-2 text-xs text-muted-foreground">
-                            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/40 flex-shrink-0" />
-                            <span className="flex-1">{act.content}</span>
-                            <span className="flex-shrink-0 text-[10px] opacity-60">
-                              {new Date(act.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+      {/* Chart */}
+      <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
+        <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
+          <div>
+            <h2 className="font-display font-semibold text-foreground">Lead Distribution</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Assigned leads by status</p>
           </div>
-        )}
+          <div className="text-2xl font-display font-bold text-foreground">{stats.total}</div>
+        </div>
+        <div className="p-6">
+          <div className="h-[220px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(215 14% 45%)' }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(215 14% 45%)' }} allowDecimals={false} />
+                <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(220 12% 18% / 0.5)', radius: 6 }} />
+                <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={52}>
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.85} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Activity Stats */}
+      <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
+        <div className="px-6 py-5 border-b border-white/5">
+          <h2 className="font-display font-semibold text-foreground">Activity</h2>
+          <p className="text-xs text-muted-foreground mt-0.5 capitalize">{period === 'today' ? 'Today' : period === 'week' ? 'This week' : 'This month'}</p>
+        </div>
+        <div className="p-6">
+          <ActivityStatsPanel userId={userId} period={period} />
+        </div>
       </div>
     </div>
   );
 }
+
+// ─── Main Dashboard ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { data: leads, isLoading } = useLeads();
@@ -169,7 +276,8 @@ export default function Dashboard() {
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
   const { data: myUsers } = useMyUsers();
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+
+  const [selectedUser, setSelectedUser] = useState<{ id: number; username: string } | null>(null);
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>("today");
 
   if (isLoading) {
@@ -221,33 +329,6 @@ export default function Dashboard() {
     { name: 'Cold', value: leads?.filter(l => l.status === 'Cold').length || 0, color: '#94a3b8' },
   ];
 
-  const StatCard = ({ title, value, icon: Icon, color, bg, border, link }: typeof leadSummaryCards[0]) => (
-    <button onClick={() => navigate(link)} className="text-left w-full group">
-      <div className={`relative rounded-2xl p-5 border ${border} ${bg} transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/30 overflow-hidden`}>
-        <div className="flex items-center justify-between mb-4">
-          <div className={`h-9 w-9 rounded-xl ${bg} border ${border} flex items-center justify-center`}>
-            <Icon className={`h-4 w-4 ${color}`} />
-          </div>
-          <ArrowUpRight className={`h-4 w-4 ${color} opacity-0 group-hover:opacity-100 transition-opacity`} />
-        </div>
-        <div className={`text-3xl font-display font-bold ${color}`}>{value}</div>
-        <p className="text-xs text-muted-foreground mt-1 font-medium">{title}</p>
-      </div>
-    </button>
-  );
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-card border border-white/10 rounded-xl px-4 py-3 shadow-xl">
-          <p className="text-xs text-muted-foreground mb-1">{label}</p>
-          <p className="text-lg font-bold text-foreground">{payload[0].value} <span className="text-xs font-normal text-muted-foreground">leads</span></p>
-        </div>
-      );
-    }
-    return null;
-  };
-
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Header */}
@@ -266,7 +347,9 @@ export default function Dashboard() {
       <div>
         <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Lead Summary</p>
         <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-          {leadSummaryCards.map((card) => <StatCard key={card.title} {...card} />)}
+          {leadSummaryCards.map((card) => (
+            <StatCard key={card.title} {...card} onClick={() => navigate(card.link)} />
+          ))}
         </div>
       </div>
 
@@ -274,7 +357,9 @@ export default function Dashboard() {
       <div>
         <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Follow-up Summary</p>
         <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
-          {followupCards.map((card) => <StatCard key={card.title} {...card} />)}
+          {followupCards.map((card) => (
+            <StatCard key={card.title} {...card} onClick={() => navigate(card.link)} />
+          ))}
         </div>
       </div>
 
@@ -320,17 +405,20 @@ export default function Dashboard() {
         <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
           <div className="px-6 py-5 border-b border-white/5">
             <h2 className="font-display font-semibold text-foreground">Team Activity</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Click a team member to view their stats and leads</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Click a team member to view their dashboard</p>
           </div>
           <div className="p-6 space-y-5">
+            {/* User pills + period filter */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex flex-wrap gap-2 flex-1">
-                {myUsers.filter(u => u.id !== (user?.id)).map((u) => (
+                {myUsers.filter(u => u.id !== user?.id).map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => setSelectedUserId(u.id === selectedUserId ? null : u.id)}
+                    onClick={() => setSelectedUser(
+                      selectedUser?.id === u.id ? null : { id: u.id, username: u.username }
+                    )}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-medium transition-all duration-200 ${
-                      selectedUserId === u.id
+                      selectedUser?.id === u.id
                         ? 'bg-primary/10 border-primary/30 text-primary'
                         : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
                     }`}
@@ -344,28 +432,37 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1 self-start">
-                {PERIODS.map((p) => (
-                  <button
-                    key={p.value}
-                    onClick={() => setReportPeriod(p.value)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
-                      reportPeriod === p.value
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+              {/* Period filter — only relevant when a user is selected */}
+              {selectedUser && (
+                <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1 self-start">
+                  {PERIODS.map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => setReportPeriod(p.value)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+                        reportPeriod === p.value
+                          ? 'bg-primary text-primary-foreground'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {selectedUserId ? (
-              <UserActivityPanel userId={selectedUserId} period={reportPeriod} />
+            {/* User dashboard or prompt */}
+            {selectedUser ? (
+              <UserDashboard
+                userId={selectedUser.id}
+                username={selectedUser.username}
+                period={reportPeriod}
+                onBack={() => setSelectedUser(null)}
+              />
             ) : (
               <div className="text-center py-8 text-muted-foreground text-sm">
-                Select a team member above to view their activity and leads
+                Select a team member above to view their dashboard
               </div>
             )}
           </div>
