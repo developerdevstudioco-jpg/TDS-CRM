@@ -21,7 +21,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, Plus, MoreVertical, Upload, Trash2, Edit2, MessageCircle, MessageSquare, Phone,
   Loader2, FileDown, ClipboardList, StickyNote, ArrowRightLeft, Clock, Users,
-  ChevronDown, X, CalendarClock, Filter, Calendar, Send, PenLine, MessageSquareText
+  ChevronDown, X, CalendarClock, Filter, Calendar, Send, PenLine, MessageSquareText, RotateCcw
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lead } from "@shared/schema";
@@ -625,6 +625,7 @@ export default function Leads() {
 
   const [messageLead, setMessageLead] = useState<Lead | null>(null);
   const [messageType, setMessageType] = useState<'whatsapp' | 'sms' | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'lost' | 'converted'>('active');
 
   const [formData, setFormData] = useState({
     name: "", mobile: "", email: "", company: "", status: "Open",
@@ -643,7 +644,15 @@ export default function Leads() {
   const today = getToday();
   const tomorrow = getTomorrow();
 
+  const ARCHIVED_STATUSES = ['Not Interested', 'Converted'];
+  const lostCount = (leads || []).filter(l => l.status === 'Not Interested').length;
+  const convertedCount = (leads || []).filter(l => l.status === 'Converted').length;
+  const activeCount = (leads || []).filter(l => !ARCHIVED_STATUSES.includes(l.status)).length;
+
   const filteredLeads = (leads || []).filter(l => {
+    if (activeTab === 'lost') return l.status === 'Not Interested';
+    if (activeTab === 'converted') return l.status === 'Converted';
+    if (ARCHIVED_STATUSES.includes(l.status)) return false;
     const matchesSearch = !searchTerm ||
       l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       l.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -881,9 +890,34 @@ export default function Leads() {
         />
       )}
 
+      {/* Tab switcher */}
+      <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('active')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'active' ? 'bg-card border border-white/10 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          Active
+          <span className="text-xs opacity-50 font-normal">{activeCount}</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('lost')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'lost' ? 'bg-card border border-white/10 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          Lost
+          <span className="text-xs opacity-50 font-normal">{lostCount}</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('converted')}
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'converted' ? 'bg-card border border-white/10 text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          Converted
+          <span className="text-xs opacity-50 font-normal">{convertedCount}</span>
+        </button>
+      </div>
+
       <Card className="border-border/50 shadow-sm">
         <CardHeader className="p-4 border-b border-border/40 bg-muted/10 flex flex-col gap-3 space-y-0">
-          <div className="flex flex-wrap items-center gap-3">
+          {activeTab === 'active' && <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[180px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search leads..." className="pl-9 bg-white/5 border-white/10" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -895,7 +929,7 @@ export default function Leads() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {STATUSES.filter(s => !['Not Interested','Converted'].includes(s)).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
@@ -916,7 +950,7 @@ export default function Leads() {
                 <Badge variant="secondary" className="ml-1 h-4 w-4 rounded-full p-0 flex items-center justify-center text-[10px]">{activeFiltersCount}</Badge>
               </Button>
             )}
-          </div>
+          </div>}
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
@@ -924,8 +958,12 @@ export default function Leads() {
           ) : filteredLeads.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
               <FileDown className="h-12 w-12 mb-4 opacity-20" />
-              <p className="text-lg font-medium text-foreground">No leads found</p>
-              <p className="text-sm">Try adjusting your search or filters.</p>
+              <p className="text-lg font-medium text-foreground">
+                {activeTab === 'lost' ? 'No lost leads' : activeTab === 'converted' ? 'No converted leads' : 'No leads found'}
+              </p>
+              <p className="text-sm">
+                {activeTab === 'active' ? 'Try adjusting your search or filters.' : 'Leads will appear here when their status changes.'}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -999,6 +1037,16 @@ export default function Leads() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {(activeTab === 'lost' || activeTab === 'converted') && (
+                            <Button
+                              variant="ghost" size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100 text-emerald-400 hover:text-emerald-400 hover:bg-emerald-400/10 transition-opacity"
+                              onClick={() => handleInlineStatusUpdate(lead.id, 'Open')}
+                              title="Restore to Active"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost" size="icon"
                             className="h-8 w-8 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive hover:bg-destructive/10 transition-opacity"
