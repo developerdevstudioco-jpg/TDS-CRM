@@ -134,6 +134,8 @@ function UserDashboard({
   onBack: () => void;
 }) {
   const { data: leads, isLoading } = useUserLeadsForDashboard(userId);
+  const [, setLocation] = useLocation();
+  const navigate = (path: string) => setLocation(path);
 
   const today = getToday();
   const tomorrow = getTomorrow();
@@ -154,17 +156,17 @@ function UserDashboard({
   };
 
   const leadSummaryCards = [
-    { title: "Total Leads", value: stats.total, icon: Users, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
-    { title: "Open Leads", value: stats.open, icon: AlertCircle, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
-    { title: "Warm Leads", value: stats.warm, icon: Target, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20" },
-    { title: "Converted", value: stats.converted, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
+    { title: "Total Leads", value: stats.total, icon: Users, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", link: `/leads?assignedTo=${userId}` },
+    { title: "Open Leads", value: stats.open, icon: AlertCircle, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", link: `/leads?assignedTo=${userId}&status=Open` },
+    { title: "Warm Leads", value: stats.warm, icon: Target, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", link: `/leads?assignedTo=${userId}&status=Warm` },
+    { title: "Converted", value: stats.converted, icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", link: `/leads?assignedTo=${userId}&status=Converted` },
   ];
 
   const followupCards = [
-    { title: "Will Register", value: stats.willRegister, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
-    { title: "Today Follow-up", value: stats.todayFollowup, icon: CalendarCheck, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20" },
-    { title: "Tomorrow", value: stats.tomorrowFollowup, icon: CalendarClock, color: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/20" },
-    { title: "Overdue", value: stats.overdue, icon: CalendarX, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20" },
+    { title: "Will Register", value: stats.willRegister, icon: TrendingUp, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20", link: `/leads?assignedTo=${userId}&status=Will+Convert` },
+    { title: "Today Follow-up", value: stats.todayFollowup, icon: CalendarCheck, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20", link: `/leads?assignedTo=${userId}&followup=today` },
+    { title: "Tomorrow", value: stats.tomorrowFollowup, icon: CalendarClock, color: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/20", link: `/leads?assignedTo=${userId}&followup=tomorrow` },
+    { title: "Overdue", value: stats.overdue, icon: CalendarX, color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20", link: `/leads?assignedTo=${userId}&followup=overdue` },
   ];
 
   const chartData = [
@@ -210,7 +212,7 @@ function UserDashboard({
         <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Lead Summary</p>
         <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
           {leadSummaryCards.map((card) => (
-            <StatCard key={card.title} {...card} />
+            <StatCard key={card.title} {...card} onClick={() => navigate(card.link)} />
           ))}
         </div>
       </div>
@@ -220,7 +222,7 @@ function UserDashboard({
         <p className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest mb-3">Follow-up Summary</p>
         <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
           {followupCards.map((card) => (
-            <StatCard key={card.title} {...card} />
+            <StatCard key={card.title} {...card} onClick={() => navigate(card.link)} />
           ))}
         </div>
       </div>
@@ -230,14 +232,24 @@ function UserDashboard({
         <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between">
           <div>
             <h2 className="font-display font-semibold text-foreground">Lead Distribution</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Assigned leads by status</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Click a bar to filter leads by status</p>
           </div>
           <div className="text-2xl font-display font-bold text-foreground">{stats.total}</div>
         </div>
         <div className="p-6">
           <div className="h-[220px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <BarChart
+                data={chartData}
+                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                onClick={(data) => {
+                  if (data?.activePayload?.[0]) {
+                    const item = chartData.find(d => d.name === data.activePayload![0].payload.name);
+                    if (item) navigate(`/leads?assignedTo=${userId}&status=${encodeURIComponent(item.name)}`);
+                  }
+                }}
+                style={{ cursor: 'pointer' }}
+              >
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(215 14% 45%)' }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'hsl(215 14% 45%)' }} allowDecimals={false} />
                 <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: 'hsl(220 12% 18% / 0.5)', radius: 6 }} />

@@ -385,11 +385,7 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
   const updateLead = useUpdateLead();
   const { data: allUsers } = useUsers();
   const { user: currentUser } = useAuth();
-  const { toast } = useToast();
-
-  const isAdminOrManagerPanel = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-
-  const [noteText, setNoteText] = useState("");
+  const { toast } = useToast(); = useState("");
   const [newStatus, setNewStatus] = useState(lead.status);
   const [newFollowUpDate, setNewFollowUpDate] = useState(toDateInputValue(lead.followUpDate));
   const [newAssignedTo, setNewAssignedTo] = useState<string>(String(lead.assignedTo ?? 'none'));
@@ -525,41 +521,37 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
           )}
         </div>
       </div>
-      {isAdminOrManagerPanel && (
-        <>
-          <Separator />
-          <div className="py-4 space-y-3">
-            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4" /> Change Assignee</h4>
-            <div className="flex gap-2">
-              <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
-                <SelectTrigger className="flex-1 h-9">
-                  <SelectValue placeholder="Unassigned" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none"><span className="text-muted-foreground">Unassigned</span></SelectItem>
-                  {allUsers?.map(u => (
-                    <SelectItem key={u.id} value={String(u.id)}>
-                      <div className="flex items-center gap-2">
-                        <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] uppercase">
-                          {u.username.substring(0, 2)}
-                        </div>
-                        {u.username}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                size="sm"
-                onClick={handleAssigneeChange}
-                disabled={isUpdating || newAssignedTo === String(lead.assignedTo ?? 'none')}
-              >
-                {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign"}
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
+      <Separator />
+      <div className="py-4 space-y-3">
+        <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4" /> Change Assignee</h4>
+        <div className="flex gap-2">
+          <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
+            <SelectTrigger className="flex-1 h-9">
+              <SelectValue placeholder="Unassigned" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none"><span className="text-muted-foreground">Unassigned</span></SelectItem>
+              {allUsers?.map(u => (
+                <SelectItem key={u.id} value={String(u.id)}>
+                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] uppercase">
+                      {u.username.substring(0, 2)}
+                    </div>
+                    {u.username}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            onClick={handleAssigneeChange}
+            disabled={isUpdating || newAssignedTo === String(lead.assignedTo ?? 'none')}
+          >
+            {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign"}
+          </Button>
+        </div>
+      </div>
       <Separator />
       <div className="py-4 space-y-3">
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><StickyNote className="h-4 w-4" /> Add Note</h4>
@@ -670,6 +662,7 @@ export default function Leads() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [followUpFilter, setFollowUpFilter] = useState<FollowUpFilter>("all");
+  const [assignedToFilter, setAssignedToFilter] = useState<number | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingLead, setEditingLead] = useState<LeadWithUser | null>(null);
   const [detailLead, setDetailLead] = useState<LeadWithUser | null>(null);
@@ -690,8 +683,10 @@ export default function Leads() {
     const params = new URLSearchParams(search);
     const s = params.get('status');
     const f = params.get('followup') as FollowUpFilter | null;
+    const a = params.get('assignedTo');
     if (s) setStatusFilter(s);
     if (f) setFollowUpFilter(f);
+    if (a) setAssignedToFilter(Number(a));
   }, []);
 
   const today = getToday();
@@ -720,7 +715,8 @@ export default function Leads() {
       if (!l.followUpDate) { matchesFollowUp = false; }
       else { const d = new Date(l.followUpDate); d.setHours(0, 0, 0, 0); matchesFollowUp = d < today; }
     }
-    return matchesSearch && matchesStatus && matchesFollowUp;
+    const matchesAssignedTo = !assignedToFilter || l.assignedTo === assignedToFilter;
+    return matchesSearch && matchesStatus && matchesFollowUp && matchesAssignedTo;
   });
 
   const isAllSelected = filteredLeads.length > 0 && filteredLeads.every(l => selectedIds.has(l.id));
@@ -844,15 +840,28 @@ export default function Leads() {
   };
 
   const isAdminOrManager = currentUser?.role === 'admin' || currentUser?.role === 'manager';
-  const usersList = isAdminOrManager ? (users || []) : [];
-  const activeFiltersCount = (statusFilter !== 'all' ? 1 : 0) + (followUpFilter !== 'all' ? 1 : 0);
+  const usersList = users || [];
+  const activeFiltersCount = (statusFilter !== 'all' ? 1 : 0) + (followUpFilter !== 'all' ? 1 : 0) + (assignedToFilter ? 1 : 0);
+  const assignedToUser = assignedToFilter ? users?.find(u => u.id === assignedToFilter) : null;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold tracking-tight">Leads Management</h1>
-          <p className="text-muted-foreground mt-1">Add, update, and communicate with your prospects.</p>
+          {assignedToUser ? (
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-muted-foreground text-sm">Showing leads assigned to <span className="font-medium text-foreground">{assignedToUser.username}</span></p>
+              <button
+                onClick={() => setAssignedToFilter(null)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 border border-border rounded-full px-2 py-0.5 hover:bg-muted transition-colors"
+              >
+                <X className="h-3 w-3" /> Clear
+              </button>
+            </div>
+          ) : (
+            <p className="text-muted-foreground mt-1">Add, update, and communicate with your prospects.</p>
+          )}
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />

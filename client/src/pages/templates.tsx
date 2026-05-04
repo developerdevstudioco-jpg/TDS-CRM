@@ -1,20 +1,22 @@
 import { useState, useRef } from "react";
-import { useTemplates, useCreateTemplate, useDeleteTemplate } from "@/hooks/use-templates";
+import { useTemplates, useCreateTemplate, useUpdateTemplate, useDeleteTemplate } from "@/hooks/use-templates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { MessageSquareQuote, Plus, Trash2, Loader2, Sparkles, FileText, Upload, X } from "lucide-react";
+import { MessageSquareQuote, Plus, Trash2, Loader2, Sparkles, FileText, Upload, X, Edit2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Templates() {
   const { data: templates, isLoading } = useTemplates();
   const createTemplate = useCreateTemplate();
+  const updateTemplate = useUpdateTemplate();
   const deleteTemplate = useDeleteTemplate();
   const { toast } = useToast();
 
   const [isOpen, setIsOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any | null>(null);
   const [formData, setFormData] = useState({ name: "", content: "", pdfUrl: "", pdfName: "" });
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
@@ -55,17 +57,36 @@ export default function Templates() {
     if (pdfInputRef.current) pdfInputRef.current.value = "";
   };
 
+  const openEdit = (template: any) => {
+    setEditingTemplate(template);
+    setFormData({ name: template.name, content: template.content, pdfUrl: template.pdfUrl || "", pdfName: template.pdfName || "" });
+    if (template.pdfUrl) setPdfFile({ name: template.pdfName || "Existing PDF" } as File);
+    setIsOpen(true);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createTemplate.mutateAsync({
-        name: formData.name,
-        content: formData.content,
-        pdfUrl: formData.pdfUrl || undefined,
-        pdfName: formData.pdfName || undefined,
-      } as any);
-      toast({ title: "Template created successfully" });
+      if (editingTemplate) {
+        await updateTemplate.mutateAsync({
+          id: editingTemplate.id,
+          name: formData.name,
+          content: formData.content,
+          pdfUrl: formData.pdfUrl || undefined,
+          pdfName: formData.pdfName || undefined,
+        } as any);
+        toast({ title: "Template updated successfully" });
+      } else {
+        await createTemplate.mutateAsync({
+          name: formData.name,
+          content: formData.content,
+          pdfUrl: formData.pdfUrl || undefined,
+          pdfName: formData.pdfName || undefined,
+        } as any);
+        toast({ title: "Template created successfully" });
+      }
       setIsOpen(false);
+      setEditingTemplate(null);
       setFormData({ name: "", content: "", pdfUrl: "", pdfName: "" });
       setPdfFile(null);
     } catch (err: any) {
@@ -93,7 +114,7 @@ export default function Templates() {
           <p className="text-muted-foreground mt-1 text-sm">Create reusable message templates for quick communication.</p>
         </div>
 
-        <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) { setFormData({ name: "", content: "", pdfUrl: "", pdfName: "" }); setPdfFile(null); } }}>
+        <Dialog open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) { setEditingTemplate(null); setFormData({ name: "", content: "", pdfUrl: "", pdfName: "" }); setPdfFile(null); } }}>
           <DialogTrigger asChild>
             <Button className="hover-elevate bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
               <Plus className="h-4 w-4 mr-2" /> New Template
@@ -102,7 +123,7 @@ export default function Templates() {
           <DialogContent className="bg-card border-white/10 shadow-2xl shadow-black/50 max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleSave}>
               <DialogHeader>
-                <DialogTitle className="font-display">Create Template</DialogTitle>
+                <DialogTitle className="font-display">{editingTemplate ? "Edit Template" : "Create Template"}</DialogTitle>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="space-y-2">
@@ -172,10 +193,10 @@ export default function Templates() {
               <DialogFooter>
                 <Button
                   type="submit"
-                  disabled={createTemplate.isPending || isUploadingPdf}
+                  disabled={createTemplate.isPending || updateTemplate.isPending || isUploadingPdf}
                   className="bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                  {createTemplate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Template"}
+                  {createTemplate.isPending || updateTemplate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editingTemplate ? "Save Changes" : "Save Template"}
                 </Button>
               </DialogFooter>
             </form>
@@ -211,12 +232,20 @@ export default function Templates() {
                   </div>
                   <h3 className="font-display font-semibold text-sm text-foreground leading-tight">{template.name}</h3>
                 </div>
-                <button
-                  onClick={() => handleDelete(template.id)}
-                  className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all duration-200 shrink-0"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                  <button
+                    onClick={() => openEdit(template)}
+                    className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all duration-200 shrink-0"
+                  >
+                    <Edit2 className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(template.id)}
+                    className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200 shrink-0"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Content */}
