@@ -385,7 +385,8 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
   const updateLead = useUpdateLead();
   const { data: allUsers } = useUsers();
   const { user: currentUser } = useAuth();
-  const { toast } = useToast(); = useState("");
+  const { toast } = useToast();
+  const [noteText, setNoteText] = useState("");
   const [newStatus, setNewStatus] = useState(lead.status);
   const [newFollowUpDate, setNewFollowUpDate] = useState(toDateInputValue(lead.followUpDate));
   const [newAssignedTo, setNewAssignedTo] = useState<string>(String(lead.assignedTo ?? 'none'));
