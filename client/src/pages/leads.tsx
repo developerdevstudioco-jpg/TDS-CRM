@@ -383,13 +383,31 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
   const { data: activities, isLoading: activitiesLoading } = useLeadActivities(lead.id);
   const createActivity = useCreateLeadActivity(lead.id);
   const updateLead = useUpdateLead();
+  const { data: allUsers } = useUsers();
+  const { user: currentUser } = useAuth();
   const { toast } = useToast();
+
+  const isAdminOrManagerPanel = currentUser?.role === 'admin' || currentUser?.role === 'manager';
 
   const [noteText, setNoteText] = useState("");
   const [newStatus, setNewStatus] = useState(lead.status);
   const [newFollowUpDate, setNewFollowUpDate] = useState(toDateInputValue(lead.followUpDate));
+  const [newAssignedTo, setNewAssignedTo] = useState<string>(String(lead.assignedTo ?? 'none'));
   const [isUpdating, setIsUpdating] = useState(false);
   const [msgPickerType, setMsgPickerType] = useState<'whatsapp' | 'sms' | null>(null);
+
+  const handleAssigneeChange = async () => {
+    const assignedToValue = newAssignedTo === 'none' ? null : Number(newAssignedTo);
+    if (assignedToValue === (lead.assignedTo ?? null)) return;
+    setIsUpdating(true);
+    try {
+      await updateLead.mutateAsync({ id: lead.id, assignedTo: assignedToValue });
+      onLeadUpdated();
+      toast({ title: "Assignee updated" });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally { setIsUpdating(false); }
+  };
 
   const handleStatusChange = async () => {
     if (newStatus === lead.status) return;
@@ -507,6 +525,41 @@ function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
           )}
         </div>
       </div>
+      {isAdminOrManagerPanel && (
+        <>
+          <Separator />
+          <div className="py-4 space-y-3">
+            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><Users className="h-4 w-4" /> Change Assignee</h4>
+            <div className="flex gap-2">
+              <Select value={newAssignedTo} onValueChange={setNewAssignedTo}>
+                <SelectTrigger className="flex-1 h-9">
+                  <SelectValue placeholder="Unassigned" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none"><span className="text-muted-foreground">Unassigned</span></SelectItem>
+                  {allUsers?.map(u => (
+                    <SelectItem key={u.id} value={String(u.id)}>
+                      <div className="flex items-center gap-2">
+                        <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] uppercase">
+                          {u.username.substring(0, 2)}
+                        </div>
+                        {u.username}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                onClick={handleAssigneeChange}
+                disabled={isUpdating || newAssignedTo === String(lead.assignedTo ?? 'none')}
+              >
+                {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign"}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
       <Separator />
       <div className="py-4 space-y-3">
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-2"><StickyNote className="h-4 w-4" /> Add Note</h4>
