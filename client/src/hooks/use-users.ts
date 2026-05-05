@@ -20,13 +20,9 @@ export function useAssignableUsers() {
   return useQuery({
     queryKey: ["assignable-users"],
     queryFn: async () => {
-      // Try the full users list first (admin/manager)
-      const res = await fetch(api.users.list.path, { credentials: "include" });
-      if (res.ok) return api.users.list.responses[200].parse(await res.json());
-      // For regular users, fall back to leads assignable endpoint if it exists
-      const fallback = await fetch("/api/users/assignable", { credentials: "include" });
-      if (fallback.ok) return fallback.json();
-      return [];
+      const res = await fetch("/api/users/assignable", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
     },
     retry: false,
   });

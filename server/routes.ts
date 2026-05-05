@@ -87,6 +87,33 @@ export async function registerRoutes(
     res.status(200).json(users);
   });
 
+  // Assignable users — any authenticated user can call this.
+  // Admin/manager: returns all users.
+  // User role: returns their own manager + anyone who reports to that manager.
+  app.get('/api/users/assignable', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
+        const users = await storage.getUsers();
+        return res.status(200).json(users);
+      }
+      // For user role: find their manager and manager's team
+      const allUsers = await storage.getUsers();
+      const managerId = currentUser.managerId;
+      if (!managerId) {
+        // No manager assigned — return just themselves so they can self-assign
+        const self = allUsers.find((u: any) => u.id === currentUser.id);
+        return res.status(200).json(self ? [self] : []);
+      }
+      const manager = allUsers.find((u: any) => u.id === managerId);
+      // Everyone who reports to the same manager (siblings) + the manager themselves
+      const peers = allUsers.filter((u: any) => u.managerId === managerId || u.id === managerId);
+      return res.status(200).json(peers);
+    } catch (err: any) {
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
+
   app.post(api.users.create.path, requireAdmin, async (req, res) => {
     try {
       const input = api.users.create.input.parse(req.body);
