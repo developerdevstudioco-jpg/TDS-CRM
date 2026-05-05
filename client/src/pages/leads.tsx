@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useSearch } from "wouter";
 import { useLeads, useCreateLead, useUpdateLead, useDeleteLead, useUploadCsv, useBulkUpdateLeads } from "@/hooks/use-leads";
 import { useLeadActivities, useCreateLeadActivity } from "@/hooks/use-lead-activities";
-import { useUsers } from "@/hooks/use-users";
+import { useUsers, useAssignableUsers } from "@/hooks/use-users";
 import { useTemplates } from "@/hooks/use-templates";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -377,13 +377,12 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
   );
 }
 
-function LeadDetailPanel({ lead, onClose, onLeadUpdated }: {
-  lead: LeadWithUser; onClose: () => void; onLeadUpdated: () => void;
+function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
+  lead: LeadWithUser; users: any[]; onClose: () => void; onLeadUpdated: () => void;
 }) {
   const { data: activities, isLoading: activitiesLoading } = useLeadActivities(lead.id);
   const createActivity = useCreateLeadActivity(lead.id);
   const updateLead = useUpdateLead();
-  const { data: allUsers } = useUsers();
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const [noteText, setNoteText] = useState("");
@@ -651,7 +650,7 @@ function BulkActionBar({ selectedCount, onClearSelection, onBulkStatusChange, on
 export default function Leads() {
   const search = useSearch();
   const { data: leads, isLoading, refetch } = useLeads();
-  const { data: users } = useUsers();
+  const { data: users } = useAssignableUsers();
   const { user: currentUser } = useAuth();
   const createLead = useCreateLead();
   const updateLead = useUpdateLead();
@@ -918,21 +917,19 @@ export default function Leads() {
                   <Input id="followUpDate" type="date" value={formData.followUpDate} onChange={e => setFormData({...formData, followUpDate: e.target.value})} />
                 </div>
               </div>
-              {isAdminOrManager && (
-                <div className="space-y-2">
-                  <Label>Assign To</Label>
-                  <Select
-                    value={String(formData.assignedTo || "none")}
-                    onValueChange={(val) => setFormData({...formData, assignedTo: val === "none" ? "" : Number(val)})}
-                  >
-                    <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Unassigned</SelectItem>
-                      {usersList.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label>Assign To</Label>
+                <Select
+                  value={String(formData.assignedTo || "none")}
+                  onValueChange={(val) => setFormData({...formData, assignedTo: val === "none" ? "" : Number(val)})}
+                >
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {usersList.map(u => <SelectItem key={u.id} value={String(u.id)}>{u.username} ({u.role})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <DialogFooter>
               <Button type="submit" disabled={createLead.isPending || updateLead.isPending}>Save Lead</Button>
@@ -1164,6 +1161,7 @@ export default function Leads() {
               </SheetHeader>
               <LeadDetailPanel
                 lead={detailLead}
+                users={usersList}
                 onClose={() => setDetailLead(null)}
                 onLeadUpdated={() => {
                   refetch().then((result) => {
