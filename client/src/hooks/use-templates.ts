@@ -30,6 +30,25 @@ export function useCreateTemplate() {
   });
 }
 
+export function useUpdateTemplate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { id: number } & Partial<z.infer<typeof api.templates.create.input>>) => {
+      const { id, ...rest } = data;
+      const url = buildUrl(api.templates.update.path, { id });
+      const res = await fetch(url, {
+        method: api.templates.update.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rest),
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to update template");
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.templates.list.path] }),
+  });
+}
+
 export function useDeleteTemplate() {
   const queryClient = useQueryClient();
   return useMutation({
