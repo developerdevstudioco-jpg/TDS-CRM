@@ -1004,8 +1004,32 @@ export default function Leads() {
                 <SelectItem value="overdue">Overdue</SelectItem>
               </SelectContent>
             </Select>
+            {isAdminOrManager && (
+              <Select
+                value={assignedToFilter ? String(assignedToFilter) : "all"}
+                onValueChange={(v) => setAssignedToFilter(v === "all" ? null : Number(v))}
+              >
+                <SelectTrigger className="w-44 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-assignee">
+                  <Users className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                  <SelectValue placeholder="All Assignees" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Assignees</SelectItem>
+                  {usersList.map(u => (
+                    <SelectItem key={u.id} value={String(u.id)}>
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-4 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[9px] uppercase">
+                          {u.username.substring(0, 2)}
+                        </div>
+                        {u.username}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {activeFiltersCount > 0 && (
-              <Button variant="ghost" size="sm" className="h-9 text-muted-foreground hover:text-foreground" onClick={() => { setStatusFilter('all'); setFollowUpFilter('all'); }}>
+              <Button variant="ghost" size="sm" className="h-9 text-muted-foreground hover:text-foreground" onClick={() => { setStatusFilter('all'); setFollowUpFilter('all'); setAssignedToFilter(null); }}>
                 <X className="h-3.5 w-3.5 mr-1" /> Clear filters
                 <Badge variant="secondary" className="ml-1 h-4 w-4 rounded-full p-0 flex items-center justify-center text-[10px]">{activeFiltersCount}</Badge>
               </Button>
