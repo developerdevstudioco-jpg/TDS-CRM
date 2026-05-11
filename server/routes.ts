@@ -153,8 +153,26 @@ export async function registerRoutes(
   });
 
   app.delete(api.users.delete.path, requireAdmin, async (req, res) => {
-    await storage.deleteUser(Number(req.params.id));
-    res.status(204).end();
+    try {
+      const id = Number(req.params.id);
+      // Nullify assignedTo on any leads assigned to this user
+      const leads = await storage.getLeads({ assignedTo: id });
+      for (const lead of leads) {
+        await storage.updateLead(lead.id, { assignedTo: null });
+      }
+      // Remove managerId reference from users managed by this user
+      const allUsers = await storage.getUsers();
+      for (const u of allUsers) {
+        if (u.managerId === id) {
+          await storage.updateUser(u.id, { managerId: null });
+        }
+      }
+      await storage.deleteUser(id);
+      res.status(204).end();
+    } catch (err: any) {
+      console.error("delete user error:", err);
+      res.status(500).json({ message: err?.message || "Failed to delete user" });
+    }
   });
 
   // Leads API

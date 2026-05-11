@@ -1,591 +1,253 @@
-import type { Express } from "express";
-import type { Server } from "http";
-import { storage } from "./storage";
-import { setupAuth, hashPassword } from "./auth";
-import { api } from "../shared/routes";
-import { z } from "zod";
-import passport from "passport";
-import multer from "multer";
-import fs from "fs";
+import { z } from 'zod';
+import { insertUserSchema, insertLeadSchema, insertTemplateSchema, leads, users, templates, leadActivities } from './schema';
 
-import path from "path";
+export const errorSchemas = {
+  validation: z.object({
+    message: z.string(),
+    field: z.string().optional(),
+  }),
+  notFound: z.object({
+    message: z.string(),
+  }),
+  unauthorized: z.object({
+    message: z.string(),
+  }),
+};
 
-const storage_disk = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = "uploads/pdfs";
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
+const leadWithUserSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  mobile: z.string(),
+  email: z.string().nullable(),
+  company: z.string().nullable(),
+  status: z.string(),
+  assignedTo: z.number().nullable(),
+  followUpDate: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  assignedUsername: z.string().nullable().optional(),
+});
+
+export type LeadWithUser = z.infer<typeof leadWithUserSchema>;
+
+export const activitySummarySchema = z.object({
+  calls: z.number(),
+  whatsapp: z.number(),
+  sms: z.number(),
+  leadsCreated: z.number(),
+  statusChanges: z.number(),
+  notesAdded: z.number(),
+  followUpsSet: z.number(),
+  total: z.number(),
+});
+
+export type ActivitySummary = z.infer<typeof activitySummarySchema>;
+
+export const api = {
+  auth: {
+    login: {
+      method: 'POST' as const,
+      path: '/api/auth/login' as const,
+      input: z.object({ username: z.string(), password: z.string() }),
+      responses: {
+        200: z.custom<typeof users.$inferSelect>(),
+        401: errorSchemas.unauthorized,
+      }
+    },
+    logout: {
+      method: 'POST' as const,
+      path: '/api/auth/logout' as const,
+      responses: {
+        200: z.object({ message: z.string() }),
+      }
+    },
+    me: {
+      method: 'GET' as const,
+      path: '/api/auth/me' as const,
+      responses: {
+        200: z.custom<typeof users.$inferSelect>(),
+        401: errorSchemas.unauthorized,
+      }
+    }
   },
-  filename: (req, file, cb) => {
-    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
+  users: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/users' as const,
+      responses: {
+        200: z.array(z.custom<typeof users.$inferSelect>()),
+      }
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/users' as const,
+      input: insertUserSchema,
+      responses: {
+        201: z.custom<typeof users.$inferSelect>(),
+        400: errorSchemas.validation,
+      }
+    },
+    update: {
+      method: 'PATCH' as const,
+      path: '/api/users/:id' as const,
+      input: z.object({
+        role: z.string().optional(),
+        password: z.string().optional(),
+        username: z.string().optional(),
+        managerId: z.number().nullable().optional(),
+      }),
+      responses: {
+        200: z.custom<typeof users.$inferSelect>(),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/users/:id' as const,
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      }
+    }
   },
-});
-
-const upload = multer({ dest: "uploads/" });
-const uploadPdf = multer({ storage: storage_disk, fileFilter: (req, file, cb) => {
-  if (file.mimetype === "application/pdf") cb(null, true);
-  else cb(new Error("Only PDF files are allowed"));
-}});
-
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
-  await setupAuth(app);
-
-  // Auth Routes
-  app.post(api.auth.login.path, (req, res, next) => {
-    passport.authenticate("local", (err: any, user: any) => {
-      if (err) {
-        return res.status(401).json({ message: "Authentication failed" });
+  leads: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/leads' as const,
+      responses: {
+        200: z.array(leadWithUserSchema),
       }
-      if (!user) {
-        return res.status(401).json({ message: "Invalid credentials" });
+    },
+    get: {
+      method: 'GET' as const,
+      path: '/api/leads/:id' as const,
+      responses: {
+        200: z.custom<typeof leads.$inferSelect>(),
+        404: errorSchemas.notFound,
       }
-      req.logIn(user, (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Login error" });
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/leads' as const,
+      input: insertLeadSchema,
+      responses: {
+        201: z.custom<typeof leads.$inferSelect>(),
+        400: errorSchemas.validation,
+      }
+    },
+    update: {
+      method: 'PATCH' as const,
+      path: '/api/leads/:id' as const,
+      input: insertLeadSchema.partial(),
+      responses: {
+        200: z.custom<typeof leads.$inferSelect>(),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      }
+    },
+    bulkUpdate: {
+      method: 'POST' as const,
+      path: '/api/leads/bulk' as const,
+      input: z.object({
+        ids: z.array(z.number()),
+        updates: z.object({
+          status: z.string().optional(),
+          assignedTo: z.number().nullable().optional(),
+        }),
+      }),
+      responses: {
+        200: z.object({ count: z.number() }),
+        400: errorSchemas.validation,
+      }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/leads/:id' as const,
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      }
+    },
+    uploadCsv: {
+      method: 'POST' as const,
+      path: '/api/leads/upload' as const,
+      responses: {
+        200: z.object({ count: z.number() }),
+        400: errorSchemas.validation,
+      }
+    },
+    activities: {
+      list: {
+        method: 'GET' as const,
+        path: '/api/leads/:id/activities' as const,
+        responses: {
+          200: z.array(z.custom<typeof leadActivities.$inferSelect & { username?: string }>()),
         }
-        res.status(200).json(user);
-      });
-    })(req, res, next);
-  });
+      },
+      create: {
+        method: 'POST' as const,
+        path: '/api/leads/:id/activities' as const,
+        input: z.object({
+          type: z.enum(['note', 'status_change', 'call', 'whatsapp', 'sms', 'follow_up_set']),
+          content: z.string().optional(),
+        }),
+        responses: {
+          201: z.custom<typeof leadActivities.$inferSelect>(),
+          400: errorSchemas.validation,
+        }
+      }
+    }
+  },
+  templates: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/templates' as const,
+      responses: {
+        200: z.array(z.custom<typeof templates.$inferSelect>()),
+      }
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/templates' as const,
+      input: insertTemplateSchema,
+      responses: {
+        201: z.custom<typeof templates.$inferSelect>(),
+        400: errorSchemas.validation,
+      }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/templates/:id' as const,
+      responses: {
+        204: z.void(),
+        404: errorSchemas.notFound,
+      }
+    }
+  },
+  reports: {
+    me: {
+      method: 'GET' as const,
+      path: '/api/reports/me' as const,
+    },
+    user: {
+      method: 'GET' as const,
+      path: '/api/reports/user/:id' as const,
+    },
+    myUsers: {
+      method: 'GET' as const,
+      path: '/api/reports/my-users' as const,
+    },
+  }
+};
 
-  app.post(api.auth.logout.path, (req, res, next) => {
-    req.logout((err) => {
-      if (err) return next(err);
-      res.status(200).json({ message: "Logged out" });
+export function buildUrl(path: string, params?: Record<string, string | number>): string {
+  let url = path;
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      if (url.includes(`:${key}`)) {
+        url = url.replace(`:${key}`, String(value));
+      }
     });
-  });
-
-  app.get(api.auth.me.path, (req, res) => {
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Not authenticated" });
-    res.status(200).json(req.user);
-  });
-
-  // Middleware for checking auth
-  const requireAuth = (req: any, res: any, next: any) => {
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Not authenticated" });
-    next();
-  };
-
-  const requireAdmin = (req: any, res: any, next: any) => {
-    if (!req.isAuthenticated() || req.user.role !== "admin") return res.status(403).json({ message: "Not authorized" });
-    next();
-  };
-
-  const requireAdminOrManager = (req: any, res: any, next: any) => {
-    if (!req.isAuthenticated()) return res.status(401).json({ message: "Not authenticated" });
-    if (req.user.role !== "admin" && req.user.role !== "manager") return res.status(403).json({ message: "Not authorized" });
-    next();
-  };
-
-  // Users API — admin & manager can list users (for assignment dropdowns)
-  app.get(api.users.list.path, requireAdminOrManager, async (req, res) => {
-    const users = await storage.getUsers();
-    res.status(200).json(users);
-  });
-
-  // Assignable users — any authenticated user can call this.
-  // Admin/manager: returns all users.
-  // User role: returns their own manager + anyone who reports to that manager.
-  app.get('/api/users/assignable', requireAuth, async (req, res) => {
-    try {
-      const currentUser = req.user as any;
-      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
-        const users = await storage.getUsers();
-        return res.status(200).json(users);
-      }
-      // For user role: find their manager and manager's team
-      const allUsers = await storage.getUsers();
-      const managerId = currentUser.managerId;
-      if (!managerId) {
-        // No manager assigned — return just themselves so they can self-assign
-        const self = allUsers.find((u: any) => u.id === currentUser.id);
-        return res.status(200).json(self ? [self] : []);
-      }
-      const manager = allUsers.find((u: any) => u.id === managerId);
-      // Everyone who reports to the same manager (siblings) + the manager themselves
-      const peers = allUsers.filter((u: any) => u.managerId === managerId || u.id === managerId);
-      return res.status(200).json(peers);
-    } catch (err: any) {
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
-
-  app.post(api.users.create.path, requireAdmin, async (req, res) => {
-    try {
-      const input = api.users.create.input.parse(req.body);
-      const existing = await storage.getUserByUsername(input.username);
-      if (existing) {
-        return res.status(400).json({ message: "Username already exists" });
-      }
-      const hashed = await hashPassword(input.password);
-      const user = await storage.createUser({ ...input, password: hashed });
-      res.status(201).json(user);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.patch(api.users.update.path, requireAdmin, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.users.update.input.parse(req.body);
-      const updates: any = {};
-      if (input.role) updates.role = input.role;
-      if (input.username) updates.username = input.username;
-      if (input.password) updates.password = await hashPassword(input.password);
-      if (input.managerId !== undefined) updates.managerId = input.managerId;
-      const user = await storage.updateUser(id, updates);
-      res.status(200).json(user);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      return res.status(404).json({ message: "User not found" });
-    }
-  });
-
-  app.delete(api.users.delete.path, requireAdmin, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      // Nullify assignedTo on any leads assigned to this user
-      const leads = await storage.getLeads({ assignedTo: id });
-      for (const lead of leads) {
-        await storage.updateLead(lead.id, { assignedTo: null });
-      }
-      // Remove managerId reference from users managed by this user
-      const allUsers = await storage.getUsers();
-      for (const u of allUsers) {
-        if (u.managerId === id) {
-          await storage.updateUser(u.id, { managerId: null });
-        }
-      }
-      await storage.deleteUser(id);
-      res.status(204).end();
-    } catch (err: any) {
-      console.error("delete user error:", err);
-      res.status(500).json({ message: err?.message || "Failed to delete user" });
-    }
-  });
-
-  // Leads API
-  app.get(api.leads.list.path, requireAuth, async (req, res) => {
-    const currentUser = req.user as any;
-    // Users (non-admin, non-manager) only see their own assigned leads
-    const options = currentUser.role === 'user'
-      ? { assignedTo: currentUser.id }
-      : undefined;
-    const leads = await storage.getLeads(options);
-    res.status(200).json(leads);
-  });
-  
-  // ─── ADD THIS ROUTE HERE ───
-app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
-  try {
-    const targetId = Number(req.params.id);
-    const currentUser = req.user as any;
-
-    // Managers can only view users assigned to them
-    if (currentUser.role === 'manager') {
-      const myUsers = await storage.getUsersByManager(currentUser.id);
-      const allowed = myUsers.some((u: any) => u.id === targetId);
-      if (!allowed) {
-        return res.status(403).json({ message: "Not authorized" });
-      }
-    }
-
-    const leads = await storage.getLeads({ assignedTo: targetId });
-    res.status(200).json(leads);
-  } catch (err: any) {
-    console.error("user leads route error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
   }
-});
-
-  // Bulk update leads
-  app.post(api.leads.bulkUpdate.path, requireAuth, async (req, res) => {
-    try {
-      const input = api.leads.bulkUpdate.input.parse(req.body);
-      if (input.ids.length === 0) return res.status(400).json({ message: "No leads selected" });
-
-      const currentUser = req.user as any;
-      // For each lead, if status is changing, log activity
-      if (input.updates.status) {
-        for (const id of input.ids) {
-          const existing = await storage.getLead(id);
-          if (existing && existing.status !== input.updates.status) {
-            await storage.createLeadActivity({
-              leadId: id,
-              userId: currentUser.id,
-              type: 'status_change',
-              content: `Status changed from "${existing.status}" to "${input.updates.status}" (bulk update)`,
-            });
-          }
-        }
-      }
-      if (input.updates.assignedTo !== undefined) {
-        for (const id of input.ids) {
-          await storage.createLeadActivity({
-            leadId: id,
-            userId: currentUser.id,
-            type: 'created',
-            content: `Lead reassigned (bulk update)`,
-          });
-        }
-      }
-
-      await storage.bulkUpdateLeads(input.ids, input.updates);
-      res.status(200).json({ count: input.ids.length });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.get(api.leads.get.path, requireAuth, async (req, res) => {
-    const lead = await storage.getLead(Number(req.params.id));
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    res.status(200).json(lead);
-  });
-
-  app.post(api.leads.create.path, requireAuth, async (req, res) => {
-    try {
-      const input = api.leads.create.input.parse(req.body);
-      const lead = await storage.createLead(input);
-      // Log creation activity
-      await storage.createLeadActivity({
-        leadId: lead.id,
-        userId: (req.user as any).id,
-        type: 'created',
-        content: 'Lead created',
-      });
-      res.status(201).json(lead);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.patch(api.leads.update.path, requireAuth, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.leads.update.input.parse(req.body);
-      const existing = await storage.getLead(id);
-      if (!existing) return res.status(404).json({ message: "Lead not found" });
-
-      const lead = await storage.updateLead(id, input);
-
-      // Log status change activity automatically
-      if (input.status && input.status !== existing.status) {
-        await storage.createLeadActivity({
-          leadId: id,
-          userId: (req.user as any).id,
-          type: 'status_change',
-          content: `Status changed from "${existing.status}" to "${input.status}"`,
-        });
-      }
-
-      res.status(200).json(lead);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      return res.status(404).json({ message: "Lead not found" });
-    }
-  });
-
-  app.delete(api.leads.delete.path, requireAuth, async (req, res) => {
-    await storage.deleteLead(Number(req.params.id));
-    res.status(204).end();
-  });
-
-  // Lead Activities API
-  app.get(api.leads.activities.list.path, requireAuth, async (req, res) => {
-    const activities = await storage.getLeadActivities(Number(req.params.id));
-    res.status(200).json(activities);
-  });
-
-  app.post(api.leads.activities.create.path, requireAuth, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.leads.activities.create.input.parse(req.body);
-      const activity = await storage.createLeadActivity({
-        leadId: id,
-        userId: (req.user as any).id,
-        type: input.type,
-        content: input.content,
-      });
-      res.status(201).json(activity);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.post(api.leads.uploadCsv.path, requireAuth, upload.single("file"), async (req, res) => {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const content = fs.readFileSync(req.file.path, "utf-8");
-    const lines = content.split("\n");
-    let count = 0;
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const [name, mobile, email, company] = line.split(",").map((s: string) => s.trim());
-      if (name && mobile) {
-        const lead = await storage.createLead({ name, mobile, email, company, status: "Open" });
-        await storage.createLeadActivity({
-          leadId: lead.id,
-          userId: (req.user as any).id,
-          type: 'created',
-          content: 'Lead imported from CSV',
-        });
-        count++;
-      }
-    }
-    res.status(200).json({ count });
-  });
-
-  // Templates API
-  app.get(api.templates.list.path, requireAuth, async (req, res) => {
-    const templates = await storage.getTemplates();
-    res.status(200).json(templates);
-  });
-
-  // Upload PDF for template
-  app.post('/api/templates/upload-pdf', requireAuth, uploadPdf.single('pdf'), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ message: "No PDF uploaded" });
-      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const pdfUrl = `${baseUrl}/uploads/pdfs/${req.file.filename}`;
-      res.status(200).json({ pdfUrl, pdfName: req.file.originalname });
-    } catch (err: any) {
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
-
-  // Serve uploaded PDFs
-  app.use('/uploads/pdfs', (req: any, res: any, next: any) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    next();
-  });
-
-  app.post(api.templates.create.path, requireAuth, async (req, res) => {
-    try {
-      const { name, content, pdfUrl, pdfName } = req.body;
-      if (!name || !content) return res.status(400).json({ message: "Name and content are required" });
-      const template = await storage.createTemplate({ name, content, pdfUrl: pdfUrl || null, pdfName: pdfName || null });
-      res.status(201).json(template);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.delete(api.templates.delete.path, requireAdmin, async (req, res) => {
-    await storage.deleteTemplate(Number(req.params.id));
-    res.status(204).end();
-  });
-
-  // Reports API
-  app.get('/api/reports/me', requireAuth, async (req, res) => {
-    try {
-      const currentUser = req.user as any;
-      const { period } = req.query;
-      const { from, to } = getDateRange(period as string);
-      const summary = await storage.getActivitySummary(currentUser.id, from, to);
-      res.status(200).json(summary);
-    } catch (err: any) {
-      console.error("report error:", err);
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
-
-  app.get('/api/reports/user/:id', requireAuth, async (req, res) => {
-    try {
-      const currentUser = req.user as any;
-      const targetId = Number(req.params.id);
-      // Managers can only view their assigned users
-      if (currentUser.role === 'manager') {
-        const myUsers = await storage.getUsersByManager(currentUser.id);
-        const allowed = myUsers.some(u => u.id === targetId);
-        if (!allowed) return res.status(403).json({ message: "Not authorized" });
-      } else if (currentUser.role !== 'admin') {
-        return res.status(403).json({ message: "Not authorized" });
-      }
-      const { period } = req.query;
-      const { from, to } = getDateRange(period as string);
-      const summary = await storage.getActivitySummary(targetId, from, to);
-      res.status(200).json(summary);
-    } catch (err: any) {
-      console.error("report user error:", err);
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
-
-// ─── ADD THESE TWO ROUTES inside registerRoutes(), after the existing /api/reports/user/:id route ───
-
-// Returns leads that a user had activity on within the period, with their recent activities
-app.get('/api/reports/user/:id/leads', requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user as any;
-    const targetId = Number(req.params.id);
-
-    // Auth check: managers can only view their assigned users
-    if (currentUser.role === 'manager') {
-      const myUsers = await storage.getUsersByManager(currentUser.id);
-      const allowed = myUsers.some((u: any) => u.id === targetId);
-      if (!allowed) return res.status(403).json({ message: "Not authorized" });
-    } else if (currentUser.role !== 'admin') {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    const { period } = req.query;
-    const { from, to } = getDateRange(period as string);
-
-    // Get all activities by this user in the period
-    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
-
-    // Group by leadId
-    const leadMap = new Map<number, any[]>();
-    for (const act of activities) {
-      if (!leadMap.has(act.leadId)) leadMap.set(act.leadId, []);
-      leadMap.get(act.leadId)!.push(act);
-    }
-
-    // Fetch each lead and attach its activities
-    const result = [];
-    for (const [leadId, acts] of leadMap) {
-      const lead = await storage.getLead(leadId);
-      if (!lead) continue;
-      result.push({
-        ...lead,
-        activityCount: acts.length,
-        recentActivities: acts
-          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .slice(0, 3),
-      });
-    }
-
-    // Sort by most recent activity first
-    result.sort((a, b) => {
-      const aTime = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
-      const bTime = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
-      return bTime - aTime;
-    });
-
-    res.status(200).json(result);
-  } catch (err: any) {
-    console.error("user leads error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
-  }
-});
-
-// Returns individual activity records for a user filtered by type and period (for My Report drill-down)
-app.get('/api/reports/activities', requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user as any;
-    const { period, type, userId: queryUserId } = req.query;
-
-    let targetId = currentUser.id;
-
-    // If a userId is specified, check authorization
-    if (queryUserId) {
-      targetId = Number(queryUserId);
-      if (currentUser.role === 'manager') {
-        const myUsers = await storage.getUsersByManager(currentUser.id);
-        const allowed = myUsers.some((u: any) => u.id === targetId);
-        if (!allowed) return res.status(403).json({ message: "Not authorized" });
-      } else if (currentUser.role !== 'admin' && targetId !== currentUser.id) {
-        return res.status(403).json({ message: "Not authorized" });
-      }
-    }
-
-    const { from, to } = getDateRange(period as string);
-    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
-
-    // Filter by type if provided
-    const filtered = type
-      ? activities.filter((a: any) => a.type === type)
-      : activities;
-
-    // Enrich with lead info
-    const enriched = await Promise.all(
-      filtered.map(async (act: any) => {
-        const lead = await storage.getLead(act.leadId);
-        return {
-          ...act,
-          leadName: lead?.name ?? 'Unknown',
-          leadCompany: lead?.company ?? null,
-          leadMobile: lead?.mobile ?? null,
-          leadStatus: lead?.status ?? null,
-        };
-      })
-    );
-
-    // Sort newest first
-    enriched.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    res.status(200).json(enriched);
-  } catch (err: any) {
-    console.error("activities error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
-  }
-});
-
-  app.get('/api/reports/my-users', requireAuth, async (req, res) => {
-    try {
-      const currentUser = req.user as any;
-      if (currentUser.role === 'manager') {
-        const myUsers = await storage.getUsersByManager(currentUser.id);
-        return res.status(200).json(myUsers);
-      } else if (currentUser.role === 'admin') {
-        const allUsers = await storage.getUsers();
-        return res.status(200).json(allUsers);
-      }
-      return res.status(403).json({ message: "Not authorized" });
-    } catch (err: any) {
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
-
-  return httpServer;
-}
-
-function getDateRange(period: string): { from: Date; to: Date } {
-  const now = new Date();
-  const to = new Date(now);
-  to.setDate(to.getDate() + 1);
-  to.setHours(0, 0, 0, 0);
-
-  const from = new Date();
-  from.setHours(0, 0, 0, 0);
-
-  if (period === 'week') {
-    from.setDate(from.getDate() - from.getDay()); // start of week (Sunday)
-  } else if (period === 'month') {
-    from.setDate(1); // start of month
-  }
-  // default: today
-
-  return { from, to };
+  return url;
 }
