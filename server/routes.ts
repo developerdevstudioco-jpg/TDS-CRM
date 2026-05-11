@@ -167,6 +167,12 @@ export async function registerRoutes(
           await storage.updateUser(u.id, { managerId: null });
         }
       }
+      // Nullify userId on lead_activities to avoid FK constraint violation.
+      // Uses the db pool directly since no storage method exists for this.
+      await storage.pool.query(
+        "UPDATE lead_activities SET user_id = NULL WHERE user_id = $1",
+        [id]
+      );
       await storage.deleteUser(id);
       res.status(204).end();
     } catch (err: any) {
