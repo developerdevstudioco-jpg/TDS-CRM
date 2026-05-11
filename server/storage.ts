@@ -44,6 +44,7 @@ export interface IStorage {
   getLeadActivities(leadId: number): Promise<LeadActivityWithUser[]>;
   createLeadActivity(activity: InsertLeadActivity): Promise<LeadActivity>;
   getActivitiesByUserInRange(userId: number, from: Date, to: Date): Promise<LeadActivity[]>;
+  nullifyUserActivities(userId: number): Promise<void>;
 
   // Reports
   getActivitySummary(userId: number, from: Date, to: Date): Promise<ActivitySummary>;
@@ -176,6 +177,12 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(desc(leadActivities.createdAt));
+  }
+
+  async nullifyUserActivities(userId: number): Promise<void> {
+    await db.update(leadActivities)
+      .set({ userId: null })
+      .where(eq(leadActivities.userId, userId));
   }
 
   // Reports
