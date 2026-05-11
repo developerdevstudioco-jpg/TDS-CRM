@@ -698,22 +698,24 @@ export default function Leads() {
   const activeCount = (leads || []).filter(l => !ARCHIVED_STATUSES.includes(l.status)).length;
 
   const filteredLeads = (leads || []).filter(l => {
-    if (activeTab === 'lost') return l.status === 'Not Interested';
-    if (activeTab === 'converted') return l.status === 'Converted';
-    if (ARCHIVED_STATUSES.includes(l.status)) return false;
+    if (activeTab === 'lost' && l.status !== 'Not Interested') return false;
+    if (activeTab === 'converted' && l.status !== 'Converted') return false;
+    if (activeTab === 'active' && ARCHIVED_STATUSES.includes(l.status)) return false;
     const matchesSearch = !searchTerm ||
       l.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       l.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       l.mobile.includes(searchTerm);
-    const matchesStatus = statusFilter === "all" || l.status === statusFilter;
+    const matchesStatus = activeTab !== 'active' || statusFilter === "all" || l.status === statusFilter;
     let matchesFollowUp = true;
-    if (followUpFilter === 'today') {
-      matchesFollowUp = !!l.followUpDate && isSameDay(new Date(l.followUpDate), today);
-    } else if (followUpFilter === 'tomorrow') {
-      matchesFollowUp = !!l.followUpDate && isSameDay(new Date(l.followUpDate), tomorrow);
-    } else if (followUpFilter === 'overdue') {
-      if (!l.followUpDate) { matchesFollowUp = false; }
-      else { const d = new Date(l.followUpDate); d.setHours(0, 0, 0, 0); matchesFollowUp = d < today; }
+    if (activeTab === 'active') {
+      if (followUpFilter === 'today') {
+        matchesFollowUp = !!l.followUpDate && isSameDay(new Date(l.followUpDate), today);
+      } else if (followUpFilter === 'tomorrow') {
+        matchesFollowUp = !!l.followUpDate && isSameDay(new Date(l.followUpDate), tomorrow);
+      } else if (followUpFilter === 'overdue') {
+        if (!l.followUpDate) { matchesFollowUp = false; }
+        else { const d = new Date(l.followUpDate); d.setHours(0, 0, 0, 0); matchesFollowUp = d < today; }
+      }
     }
     const matchesAssignedTo = !assignedToFilter || l.assignedTo === assignedToFilter;
     return matchesSearch && matchesStatus && matchesFollowUp && matchesAssignedTo;
@@ -977,33 +979,37 @@ export default function Leads() {
 
       <Card className="border-border/50 shadow-sm">
         <CardHeader className="p-4 border-b border-border/40 bg-muted/10 flex flex-col gap-3 space-y-0">
-          {activeTab === 'active' && <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="relative flex-1 min-w-[180px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search leads..." className="pl-9 bg-white/5 border-white/10" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-status">
-                <Filter className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {STATUSES.filter(s => !['Not Interested','Converted'].includes(s)).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
-              <SelectTrigger className="w-44 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-followup">
-                <CalendarClock className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
-                <SelectValue placeholder="Follow-up" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Follow-ups</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="tomorrow">Tomorrow</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-              </SelectContent>
-            </Select>
+            {activeTab === 'active' && (
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-status">
+                  <Filter className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {STATUSES.filter(s => !['Not Interested','Converted'].includes(s)).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {activeTab === 'active' && (
+              <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as FollowUpFilter)}>
+                <SelectTrigger className="w-44 bg-white/5 border-white/10 h-9 text-sm" data-testid="select-filter-followup">
+                  <CalendarClock className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                  <SelectValue placeholder="Follow-up" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Follow-ups</SelectItem>
+                  <SelectItem value="today">Today</SelectItem>
+                  <SelectItem value="tomorrow">Tomorrow</SelectItem>
+                  <SelectItem value="overdue">Overdue</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             {isAdminOrManager && (
               <Select
                 value={assignedToFilter ? String(assignedToFilter) : "all"}
@@ -1034,7 +1040,7 @@ export default function Leads() {
                 <Badge variant="secondary" className="ml-1 h-4 w-4 rounded-full p-0 flex items-center justify-center text-[10px]">{activeFiltersCount}</Badge>
               </Button>
             )}
-          </div>}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
