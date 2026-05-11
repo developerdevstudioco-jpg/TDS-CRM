@@ -444,7 +444,7 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-y-auto pr-1">
       <div className="space-y-3 pb-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div><p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Mobile</p><p className="font-medium mt-0.5">{lead.mobile}</p></div>
@@ -563,14 +563,14 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
         </form>
       </div>
       <Separator />
-      <div className="py-4 flex-1 overflow-hidden flex flex-col">
+      <div className="py-4 space-y-3">
         <h4 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3"><Clock className="h-4 w-4" /> Activity History</h4>
         {activitiesLoading ? (
           <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
         ) : !activities?.length ? (
           <p className="text-sm text-muted-foreground text-center py-4">No activity yet.</p>
         ) : (
-          <div className="space-y-3 overflow-y-auto pr-1">
+          <div className="space-y-3">
             {activities.map((activity) => (
               <div key={activity.id} className="flex items-start gap-2.5 text-sm">
                 <ActivityIcon type={activity.type} />
