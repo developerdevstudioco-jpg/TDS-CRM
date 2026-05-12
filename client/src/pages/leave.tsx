@@ -62,6 +62,17 @@ function useMyLeads() {
   });
 }
 
+function useTeamMembers() {
+  return useQuery<{ id: number; username: string }[]>({
+    queryKey: ["/api/users"],
+    queryFn: async () => {
+      const res = await fetch("/api/users", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch users");
+      return res.json();
+    },
+  });
+}
+
 function useApplyLeave() {
   const qc = useQueryClient();
   return useMutation({
@@ -306,11 +317,128 @@ function LeaveCalendar({
   );
 }
 
+// ── Team Calendar (manager read-only view) ───────────────────────────────────
+function TeamCalendar({ leaves, members }: { leaves: LeaveRequest[]; members: { id: number; username: string }[] }) {
+  const today = new Date();
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth());
+  const [selectedMember, setSelectedMember] = useState<number | "all">("all");
+
+  const monthName = new Date(calYear, calMonth, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const todayKey = toDateKey(today);
+
+  // Map: dateKey -> list of usernames on leave
+  const leaveDayMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const l of leaves) {
+      if (l.status === "rejected") continue;
+      if (selectedMember !== "all" && l.userId !== selectedMember) continue;
+      const start = new Date(l.startDate);
+      const end = new Date(l.endDate);
+      const cur = new Date(start);
+      while (cur <= end) {
+        const key = toDateKey(cur);
+        if (!map.has(key)) map.set(key, []);
+        if (l.username && !map.get(key)!.includes(l.username)) map.get(key)!.push(l.username);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+    return map;
+  }, [leaves, selectedMember]);
+
+  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); };
+  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); };
+
+  return (
+    <Card className="border-border/50 shadow-sm">
+      <CardHeader className="p-4 border-b border-border/40 bg-muted/10">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-sm font-semibold">{monthName} — Team Calendar</p>
+          <div className="flex items-center gap-2">
+            <select
+              className="text-xs bg-muted/30 border border-border/50 rounded-lg px-2 py-1.5 text-foreground focus:outline-none"
+              value={selectedMember}
+              onChange={e => setSelectedMember(e.target.value === "all" ? "all" : Number(e.target.value))}
+            >
+              <option value="all">All Members</option>
+              {members.map(m => <option key={m.id} value={m.id}>{m.username}</option>)}
+            </select>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={prevMonth}><ChevronLeft className="h-4 w-4" /></Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={nextMonth}><ChevronRight className="h-4 w-4" /></Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">
+        <div className="grid grid-cols-7 mb-2">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
+            <div key={d} className="text-center text-[10px] font-semibold text-muted-foreground py-1">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-y-1">
+          {cells.map((day, i) => {
+            if (!day) return <div key={`empty-${i}`} />;
+            const key = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const names = leaveDayMap.get(key) || [];
+            const isLeave = names.length > 0;
+            const isToday = key === todayKey;
+            const isSunday = new Date(calYear, calMonth, day).getDay() === 0;
+
+            let cellClass = "relative group flex flex-col items-center justify-start h-10 w-full rounded-lg text-xs font-medium transition-colors pt-1 ";
+            if (isLeave) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            else if (isToday) cellClass += "bg-primary/20 text-primary border border-primary/30 font-bold";
+            else if (isSunday) cellClass += "text-muted-foreground/40";
+            else cellClass += "text-foreground/70";
+
+            return (
+              <div key={key} className={cellClass} title={names.join(", ")}>
+                {day}
+                {isLeave && (
+                  <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center">
+                    {names.slice(0, 3).map((n, idx) => (
+                      <span key={idx} className="h-1.5 w-1.5 rounded-full bg-pink-400" />
+                    ))}
+                    {names.length > 3 && <span className="text-[8px] text-pink-400">+{names.length - 3}</span>}
+                  </div>
+                )}
+                {isLeave && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:flex flex-col bg-popover border border-border rounded-lg px-2 py-1.5 shadow-lg z-10 whitespace-nowrap text-[10px] text-foreground">
+                    {names.map((n, idx) => <span key={idx}>🏖 {n}</span>)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border/30">
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-pink-500/30 border border-pink-500/40" />
+            <span className="text-[10px] text-muted-foreground">On Leave</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-primary/20 border border-primary/30" />
+            <span className="text-[10px] text-muted-foreground">Today</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground ml-auto">Hover date to see names</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Leave() {
   const { user: currentUser } = useAuth();
   const { data: leaves, isLoading } = useLeaves();
   const { data: leads = [] } = useMyLeads();
+  const { data: teamMembers = [] } = useTeamMembers();
   const applyLeave = useApplyLeave();
   const updateLeave = useUpdateLeave();
   const cancelLeave = useCancelLeave();
@@ -471,6 +599,11 @@ export default function Leave() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {/* Team Calendar — manager/admin only */}
+      {isAdminOrManager && leaves && (
+        <TeamCalendar leaves={leaves} members={teamMembers} />
       )}
 
       {/* Calendar + Table layout */}

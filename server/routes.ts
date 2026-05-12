@@ -106,7 +106,15 @@ export async function registerRoutes(
       } else {
         leaves = await storage.getLeaveRequests({ userId: currentUser.id });
       }
-      res.json(leaves);
+      // Enrich with usernames
+      const allUsers = await storage.getUsers();
+      const userMap = Object.fromEntries(allUsers.map((u: any) => [u.id, u.username]));
+      const enriched = leaves.map((l: any) => ({
+        ...l,
+        username: userMap[l.userId] || null,
+        managerName: l.managerId ? userMap[l.managerId] || null : null,
+      }));
+      res.json(enriched);
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to fetch leaves" });
     }
