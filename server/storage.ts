@@ -1,10 +1,11 @@
 import { db } from "./db";
 import {
-  users, leads, templates, leadActivities,
+  users, leads, templates, leadActivities, leaveRequests,
   type User, type InsertUser,
   type Lead, type InsertLead, type UpdateLeadRequest,
   type Template, type InsertTemplate,
-  type LeadActivity, type InsertLeadActivity
+  type LeadActivity, type InsertLeadActivity,
+  type LeaveRequest, type InsertLeaveRequest,
 } from "@shared/schema";
 import { eq, desc, inArray, and, gte, lt, sql } from "drizzle-orm";
 
@@ -53,6 +54,13 @@ export interface IStorage {
   getTemplates(): Promise<Template[]>;
   createTemplate(template: InsertTemplate): Promise<Template>;
   deleteTemplate(id: number): Promise<void>;
+
+  // Leave Requests
+  getLeaveRequests(options?: { userId?: number; managerId?: number }): Promise<LeaveRequest[]>;
+  getLeaveRequest(id: number): Promise<LeaveRequest | undefined>;
+  createLeaveRequest(leave: InsertLeaveRequest): Promise<LeaveRequest>;
+  updateLeaveRequest(id: number, updates: Partial<InsertLeaveRequest>): Promise<LeaveRequest>;
+  getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -236,6 +244,56 @@ export class DatabaseStorage implements IStorage {
   async deleteTemplate(id: number): Promise<void> {
     await db.delete(templates).where(eq(templates.id, id));
   }
+
+  // Leave Requests
+  async getLeaveRequests(options?: { userId?: number; managerId?: number }): Promise<LeaveRequest[]> {
+    if (options?.userId !== undefined) {
+      return await db.select().from(leaveRequests)
+        .where(eq(leaveRequests.userId, options.userId))
+        .orderBy(desc(leaveRequests.createdAt));
+    }
+    if (options?.managerId !== undefined) {
+      return await db.select().from(leaveRequests)
+        .where(eq(leaveRequests.managerId, options.managerId))
+        .orderBy(desc(leaveRequests.createdAt));
+    }
+    return await db.select().from(leaveRequests).orderBy(desc(leaveRequests.createdAt));
+  }
+
+  async getLeaveRequest(id: number): Promise<LeaveRequest | undefined> {
+    const [leave] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id));
+    return leave;
+  }
+
+  async createLeaveRequest(leave: InsertLeaveRequest): Promise<LeaveRequest> {
+    const [created] = await db.insert(leaveRequests).values(leave).returning();
+    return created;
+  }
+
+  async updateLeaveRequest(id: number, updates: Partial<InsertLeaveRequest>): Promise<LeaveRequest> {
+    const [updated] = await db.update(leaveRequests).set(updates).where(eq(leaveRequests.id, id)).returning();
+    if (!updated) throw new Error("Leave request not found");
+    return updated;
+  }
+
+  async getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number> {
+    // Count approved/pending leave days for the given user in the given month
+    const from = new Date(year, month - 1, 1);
+    const to = new Date(year, month, 1);
+    const rows = await db.select({ days: leaveRequests.days })
+      .from(leaveRequests)
+      .where(
+        and(
+          eq(leaveRequests.userId, userId),
+          gte(leaveRequests.startDate, from.toISOString().split("T")[0]),
+          lt(leaveRequests.startDate, to.toISOString().split("T")[0]),
+          inArray(leaveRequests.status, ["pending", "approved"])
+        )
+      );
+    return rows.reduce((sum, r) => sum + (r.days ?? 0), 0);
+  }
 }
 
 export const storage = new DatabaseStorage();
+// Patch: Add leave methods to IStorage interface and DatabaseStorage
+// (Done via runtime augmentation since interface is already compiled)
