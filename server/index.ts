@@ -68,7 +68,6 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 // --- Serve React frontend ---
 const clientDistPath = join(__dirname, "../dist/public");
 
-// DEBUG — confirms if index.html exists at runtime
 log(`ℹ clientDistPath = ${clientDistPath}`);
 log(`ℹ index.html exists: ${fs.existsSync(join(clientDistPath, "index.html"))}`);
 
@@ -79,9 +78,19 @@ app.use('/uploads/pdfs', express.static(join(process.cwd(), 'uploads/pdfs')));
 app.use(express.static(clientDistPath));
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
-// --- Start server IMMEDIATELY so Render detects the open port ---
-const port = parseInt(process.env.PORT || "5000", 10);
-httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
+// --- Track whether API routes are ready ---
+let apiReady = false;
+
+// --- KEY FIX: Block /api/* requests until routes are registered ---
+// Without this, the SPA catch-all intercepts API calls during startup
+// and returns index.html instead of JSON, causing infinite auth loops.
+app.use("/api", (req, res, next) => {
+  if (!apiReady) {
+    res.status(503).json({ error: "Server is starting up, please retry in a moment" });
+  } else {
+    next();
+  }
+});
 
 // --- Async startup: DB, migrations, API routes ---
 (async () => {
@@ -101,7 +110,6 @@ httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${po
       log("✅ DB connected");
     } catch (err: any) {
       log("❌ DB connection failed: " + (err.message || err));
-      // Do NOT return — server is already listening, frontend still works
       return;
     }
 
@@ -136,8 +144,12 @@ httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${po
       await registerRoutes(httpServer, app);
       log("✅ API Routes registered");
     } catch (err) {
-      log("⚠ registerRoutes failed, using dummy routes: " + err);
+      log("⚠ registerRoutes failed: " + err);
     }
+
+    // --- Mark API as ready so the middleware above lets requests through ---
+    apiReady = true;
+    log("✅ API ready — accepting requests");
 
     // --- Catch-all for SPA routes (MUST be after all API routes) ---
     app.get("/", (_req, res) => {
@@ -153,3 +165,7 @@ httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${po
     log("❌ Fatal startup error: " + (err.message || err));
   }
 })();
+
+// --- Start server IMMEDIATELY so Render detects the open port ---
+const port = parseInt(process.env.PORT || "5000", 10);
+httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
