@@ -1,18 +1,12 @@
 import { db } from "./db";
 import {
-  users, leads, templates, leadActivities, leaveRequests,
+  users, leads, templates, leadActivities,
   type User, type InsertUser,
   type Lead, type InsertLead, type UpdateLeadRequest,
   type Template, type InsertTemplate,
-  type LeadActivity, type InsertLeadActivity,
-  type LeaveRequest, type InsertLeaveRequest,
+  type LeadActivity, type InsertLeadActivity
 } from "@shared/schema";
-import { eq, desc, inArray, and, gte, lt, sql, alias } from "drizzle-orm";
-
-export type LeaveRequestWithUser = LeaveRequest & {
-  username?: string;
-  managerName?: string;
-};
+import { eq, desc, inArray, and, gte, lt, sql } from "drizzle-orm";
 
 export type LeadActivityWithUser = LeadActivity & { username?: string };
 export type LeadWithUser = Lead & { assignedUsername?: string | null };
@@ -59,13 +53,6 @@ export interface IStorage {
   getTemplates(): Promise<Template[]>;
   createTemplate(template: InsertTemplate): Promise<Template>;
   deleteTemplate(id: number): Promise<void>;
-
-  // Leave Requests
-  getLeaveRequests(options?: { userId?: number; managerId?: number; status?: string }): Promise<LeaveRequestWithUser[]>;
-  getLeaveRequest(id: number): Promise<LeaveRequest | undefined>;
-  createLeaveRequest(data: InsertLeaveRequest): Promise<LeaveRequest>;
-  updateLeaveRequest(id: number, updates: Partial<LeaveRequest>): Promise<LeaveRequest>;
-  getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -177,6 +164,7 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  // ✅ NEW METHOD ADDED
   async getActivitiesByUserInRange(userId: number, from: Date, to: Date): Promise<LeadActivity[]> {
     return await db
       .select()
@@ -247,79 +235,6 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTemplate(id: number): Promise<void> {
     await db.delete(templates).where(eq(templates.id, id));
-  }
-
-  // Leave Requests
-  async getLeaveRequests(options?: { userId?: number; managerId?: number; status?: string }): Promise<LeaveRequestWithUser[]> {
-    const managerAlias = alias(users, "manager");
-    let query = db
-      .select({
-        id: leaveRequests.id,
-        userId: leaveRequests.userId,
-        managerId: leaveRequests.managerId,
-        startDate: leaveRequests.startDate,
-        endDate: leaveRequests.endDate,
-        days: leaveRequests.days,
-        reason: leaveRequests.reason,
-        status: leaveRequests.status,
-        isLop: leaveRequests.isLop,
-        managerNote: leaveRequests.managerNote,
-        createdAt: leaveRequests.createdAt,
-        updatedAt: leaveRequests.updatedAt,
-        username: users.username,
-        managerName: managerAlias.username,
-      })
-      .from(leaveRequests)
-      .leftJoin(users, eq(leaveRequests.userId, users.id))
-      .leftJoin(managerAlias, eq(leaveRequests.managerId, managerAlias.id))
-      .orderBy(desc(leaveRequests.createdAt));
-
-    const conditions = [];
-    if (options?.userId !== undefined) conditions.push(eq(leaveRequests.userId, options.userId));
-    if (options?.managerId !== undefined) conditions.push(eq(leaveRequests.managerId, options.managerId));
-    if (options?.status) conditions.push(eq(leaveRequests.status, options.status));
-
-    if (conditions.length > 0) {
-      return await (query as any).where(and(...conditions));
-    }
-    return await query;
-  }
-
-  async getLeaveRequest(id: number): Promise<LeaveRequest | undefined> {
-    const [leave] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id));
-    return leave;
-  }
-
-  async createLeaveRequest(data: InsertLeaveRequest): Promise<LeaveRequest> {
-    const [leave] = await db.insert(leaveRequests).values(data).returning();
-    return leave;
-  }
-
-  async updateLeaveRequest(id: number, updates: Partial<LeaveRequest>): Promise<LeaveRequest> {
-    const [updated] = await db
-      .update(leaveRequests)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(leaveRequests.id, id))
-      .returning();
-    if (!updated) throw new Error("Leave request not found");
-    return updated;
-  }
-
-  async getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number> {
-    const from = new Date(year, month - 1, 1).toISOString().split('T')[0];
-    const to = new Date(year, month, 0).toISOString().split('T')[0];
-    const rows = await db
-      .select({ days: leaveRequests.days })
-      .from(leaveRequests)
-      .where(
-        and(
-          eq(leaveRequests.userId, userId),
-          gte(leaveRequests.startDate, from),
-          lt(leaveRequests.startDate, to),
-          sql`${leaveRequests.status} != 'rejected'`
-        )
-      );
-    return rows.reduce((sum, r) => sum + r.days, 0);
   }
 }
 
