@@ -19,7 +19,8 @@ import {
   MessageSquareQuote,
   LogOut,
   Settings,
-  BarChart2
+  BarChart2,
+  CalendarDays,
 } from "lucide-react";
 
 const navigation = [
@@ -27,6 +28,7 @@ const navigation = [
   { name: "Leads", href: "/leads", icon: Users },
   { name: "Templates", href: "/templates", icon: MessageSquareQuote },
   { name: "My Report", href: "/report", icon: BarChart2 },
+  { name: "Leave", href: "/leave", icon: CalendarDays },
 ];
 
 export function AppSidebar() {
