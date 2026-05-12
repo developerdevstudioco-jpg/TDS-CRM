@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CalendarDays, Plus, Loader2, CheckCircle2, XCircle, Clock,
-  AlertTriangle, Info, Trash2, ChevronDown, ChevronUp
+  AlertTriangle, Info, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight
 } from "lucide-react";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -32,6 +32,13 @@ interface LeaveRequest {
   managerName?: string;
 }
 
+interface Lead {
+  id: number;
+  followUpDate: string | null;
+  status: string;
+  assignedTo: number | null;
+}
+
 // ── Hooks ────────────────────────────────────────────────────────────────────
 function useLeaves() {
   return useQuery<LeaveRequest[]>({
@@ -39,6 +46,17 @@ function useLeaves() {
     queryFn: async () => {
       const res = await fetch("/api/leaves", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch leaves");
+      return res.json();
+    },
+  });
+}
+
+function useMyLeads() {
+  return useQuery<Lead[]>({
+    queryKey: ["/api/leads/my"],
+    queryFn: async () => {
+      const res = await fetch("/api/leads", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch leads");
       return res.json();
     },
   });
@@ -113,6 +131,10 @@ function getWorkingDays(startDate: string, endDate: string): number {
   return days;
 }
 
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function StatusBadge({ status, isLop }: { status: string; isLop: boolean }) {
   if (status === "approved")
     return (
@@ -135,10 +157,160 @@ function StatusBadge({ status, isLop }: { status: string; isLop: boolean }) {
   );
 }
 
+// ── Mini Calendar ─────────────────────────────────────────────────────────────
+function LeaveCalendar({
+  leaves,
+  leads,
+  userId,
+}: {
+  leaves: LeaveRequest[];
+  leads: Lead[];
+  userId: number;
+}) {
+  const today = new Date();
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth()); // 0-indexed
+
+  const monthName = new Date(calYear, calMonth, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+
+  // Build set of leave days (approved or pending) for current user
+  const leaveDays = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of leaves) {
+      if (l.userId !== userId) continue;
+      if (l.status === "rejected") continue;
+      const start = new Date(l.startDate);
+      const end = new Date(l.endDate);
+      const cur = new Date(start);
+      while (cur <= end) {
+        set.add(toDateKey(cur));
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+    return set;
+  }, [leaves, userId]);
+
+  // Build set of red days: overdue follow-ups (past) + today's uncleared follow-ups
+  const redDays = useMemo(() => {
+    const set = new Set<string>();
+    const todayKey = toDateKey(today);
+    for (const lead of leads) {
+      if (!lead.followUpDate) continue;
+      const fDate = new Date(lead.followUpDate);
+      const fKey = toDateKey(fDate);
+      // Overdue = follow-up date is before today
+      // Today's uncleared = follow-up date is today
+      // Both should show red (they should be 0 at end of day)
+      if (fKey <= todayKey) {
+        set.add(fKey);
+      }
+    }
+    return set;
+  }, [leads]);
+
+  // Build calendar grid
+  const firstDay = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  // Pad to complete last row
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const prevMonth = () => {
+    if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
+    else setCalMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
+    else setCalMonth(m => m + 1);
+  };
+
+  const todayKey = toDateKey(today);
+
+  return (
+    <Card className="border-border/50 shadow-sm">
+      <CardHeader className="p-4 border-b border-border/40 bg-muted/10">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold">{monthName}</p>
+          <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={prevMonth}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={nextMonth}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">
+        {/* Day headers */}
+        <div className="grid grid-cols-7 mb-2">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
+            <div key={d} className="text-center text-[10px] font-semibold text-muted-foreground py-1">{d}</div>
+          ))}
+        </div>
+        {/* Day cells */}
+        <div className="grid grid-cols-7 gap-y-1">
+          {cells.map((day, i) => {
+            if (!day) return <div key={`empty-${i}`} />;
+            const key = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const isLeave = leaveDays.has(key);
+            const isRed = redDays.has(key);
+            const isToday = key === todayKey;
+            const isSunday = new Date(calYear, calMonth, day).getDay() === 0;
+
+            let cellClass = "relative flex items-center justify-center h-8 w-full rounded-lg text-xs font-medium transition-colors ";
+
+            if (isLeave) {
+              cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30";
+            } else if (isRed) {
+              cellClass += "bg-red-500/20 text-red-400 border border-red-500/30";
+            } else if (isToday) {
+              cellClass += "bg-primary/20 text-primary border border-primary/30 font-bold";
+            } else if (isSunday) {
+              cellClass += "text-muted-foreground/40";
+            } else {
+              cellClass += "text-foreground/70 hover:bg-muted/20";
+            }
+
+            return (
+              <div key={key} className={cellClass}>
+                {day}
+                {isToday && !isLeave && !isRed && (
+                  <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-primary" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Legend */}
+        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border/30">
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-pink-500/30 border border-pink-500/40" />
+            <span className="text-[10px] text-muted-foreground">Leave</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-red-500/30 border border-red-500/40" />
+            <span className="text-[10px] text-muted-foreground">Overdue / Today follow-up</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-primary/20 border border-primary/30" />
+            <span className="text-[10px] text-muted-foreground">Today</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 export default function Leave() {
   const { user: currentUser } = useAuth();
   const { data: leaves, isLoading } = useLeaves();
+  const { data: leads = [] } = useMyLeads();
   const applyLeave = useApplyLeave();
   const updateLeave = useUpdateLeave();
   const cancelLeave = useCancelLeave();
@@ -178,6 +350,13 @@ export default function Leave() {
       toast({ title: "Invalid dates", description: "No working days in selected range.", variant: "destructive" });
       return;
     }
+    // Enforce max 2 leaves per month
+    if (monthlyStats && monthlyStats.used >= 2) {
+      toast({
+        title: "Monthly limit reached",
+        description: "You have already used 2 leaves this month. Additional days will be Loss of Pay.",
+      });
+    }
     try {
       const result = await applyLeave.mutateAsync(applyForm);
       toast({
@@ -215,8 +394,17 @@ export default function Leave() {
     }
   };
 
-  // Today's date string for min date
   const today = new Date().toISOString().split("T")[0];
+
+  // Overdue & today follow-up count (for warning banner)
+  const pendingFollowUps = useMemo(() => {
+    const todayKey = today;
+    return leads.filter(l => {
+      if (!l.followUpDate) return false;
+      const fKey = toDateKey(new Date(l.followUpDate));
+      return fKey <= todayKey;
+    }).length;
+  }, [leads, today]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -234,6 +422,17 @@ export default function Leave() {
           </Button>
         )}
       </div>
+
+      {/* Overdue follow-up warning banner */}
+      {!isAdminOrManager && pendingFollowUps > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm">
+          <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
+          <span className="text-red-400 font-medium">
+            {pendingFollowUps} follow-up{pendingFollowUps > 1 ? "s" : ""} overdue or due today
+          </span>
+          <span className="text-muted-foreground">— clear them so your calendar shows clean days.</span>
+        </div>
+      )}
 
       {/* Monthly quota cards — user role only */}
       {!isAdminOrManager && monthlyStats && (
@@ -274,129 +473,145 @@ export default function Leave() {
         </div>
       )}
 
-      {/* Leave Table */}
-      <Card className="border-border/50 shadow-sm overflow-hidden">
-        <CardHeader className="p-4 border-b border-border/40 bg-muted/10">
-          <p className="text-sm font-semibold">
-            {isAdminOrManager ? "Team Leave Requests" : "My Leave History"}
-          </p>
-        </CardHeader>
-        <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-          ) : !leaves?.length ? (
-            <div className="flex flex-col items-center justify-center p-12 text-center">
-              <CalendarDays className="h-10 w-10 text-muted-foreground/30 mb-3" />
-              <p className="font-medium">No leave requests yet</p>
-              {!isAdminOrManager && <p className="text-sm text-muted-foreground mt-1">Click "Apply Leave" to submit a request.</p>}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader className="bg-muted/5">
-                <TableRow>
-                  {isAdminOrManager && <TableHead className="font-semibold">Employee</TableHead>}
-                  <TableHead className="font-semibold">Dates</TableHead>
-                  <TableHead className="font-semibold">Days</TableHead>
-                  <TableHead className="font-semibold">Reason</TableHead>
-                  <TableHead className="font-semibold">Status</TableHead>
-                  <TableHead className="font-semibold">Applied On</TableHead>
-                  <TableHead className="text-right font-semibold">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {leaves.map((leave) => (
-                  <>
-                    <TableRow key={leave.id} className="cursor-pointer hover:bg-muted/5"
-                      onClick={() => setExpandedId(expandedId === leave.id ? null : leave.id)}>
-                      {isAdminOrManager && (
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold uppercase">
-                              {leave.username?.substring(0, 2)}
-                            </div>
-                            <span className="font-medium text-sm">{leave.username}</span>
-                          </div>
-                        </TableCell>
-                      )}
-                      <TableCell className="text-sm">
-                        <div>{formatDate(leave.startDate)}</div>
-                        {leave.startDate !== leave.endDate && (
-                          <div className="text-muted-foreground text-xs">to {formatDate(leave.endDate)}</div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-semibold">{leave.days}</span>
-                        <span className="text-muted-foreground text-xs ml-1">day{leave.days > 1 ? "s" : ""}</span>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate">
-                        {leave.reason || "—"}
-                      </TableCell>
-                      <TableCell><StatusBadge status={leave.status} isLop={leave.isLop} /></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {leave.createdAt ? formatDate(leave.createdAt) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {isAdminOrManager && leave.status === "pending" && (
-                            <Button size="sm" variant="ghost" className="text-emerald-400 hover:text-emerald-400 hover:bg-emerald-400/10"
-                              onClick={(e) => { e.stopPropagation(); setReviewLeave(leave); setManagerNote(""); }}>
-                              Review
-                            </Button>
-                          )}
-                          {!isAdminOrManager && leave.status === "pending" && (
-                            <Button size="sm" variant="ghost"
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={(e) => { e.stopPropagation(); handleCancel(leave.id); }}
-                              disabled={cancelLeave.isPending}>
-                              <Trash2 className="h-3.5 w-3.5 mr-1" /> Cancel
-                            </Button>
-                          )}
-                          <Button size="sm" variant="ghost" className="text-muted-foreground px-2"
-                            onClick={(e) => { e.stopPropagation(); setExpandedId(expandedId === leave.id ? null : leave.id); }}>
-                            {expandedId === leave.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                      </TableCell>
+      {/* Calendar + Table layout */}
+      <div className={!isAdminOrManager ? "grid grid-cols-1 lg:grid-cols-3 gap-6" : ""}>
+        {/* Calendar — user only */}
+        {!isAdminOrManager && leaves && currentUser && (
+          <div className="lg:col-span-1">
+            <LeaveCalendar
+              leaves={leaves}
+              leads={leads}
+              userId={currentUser.id}
+            />
+          </div>
+        )}
+
+        {/* Leave Table */}
+        <div className={!isAdminOrManager ? "lg:col-span-2" : ""}>
+          <Card className="border-border/50 shadow-sm overflow-hidden">
+            <CardHeader className="p-4 border-b border-border/40 bg-muted/10">
+              <p className="text-sm font-semibold">
+                {isAdminOrManager ? "Team Leave Requests" : "My Leave History"}
+              </p>
+            </CardHeader>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : !leaves?.length ? (
+                <div className="flex flex-col items-center justify-center p-12 text-center">
+                  <CalendarDays className="h-10 w-10 text-muted-foreground/30 mb-3" />
+                  <p className="font-medium">No leave requests yet</p>
+                  {!isAdminOrManager && <p className="text-sm text-muted-foreground mt-1">Click "Apply Leave" to submit a request.</p>}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader className="bg-muted/5">
+                    <TableRow>
+                      {isAdminOrManager && <TableHead className="font-semibold">Employee</TableHead>}
+                      <TableHead className="font-semibold">Dates</TableHead>
+                      <TableHead className="font-semibold">Days</TableHead>
+                      <TableHead className="font-semibold">Reason</TableHead>
+                      <TableHead className="font-semibold">Status</TableHead>
+                      <TableHead className="font-semibold">Applied On</TableHead>
+                      <TableHead className="text-right font-semibold">Actions</TableHead>
                     </TableRow>
-                    {expandedId === leave.id && (
-                      <TableRow key={`${leave.id}-detail`} className="bg-muted/5">
-                        <TableCell colSpan={isAdminOrManager ? 7 : 6} className="py-3 px-6">
-                          <div className="flex flex-wrap gap-6 text-sm">
-                            {leave.reason && (
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">Reason</p>
-                                <p>{leave.reason}</p>
+                  </TableHeader>
+                  <TableBody>
+                    {leaves.map((leave) => (
+                      <>
+                        <TableRow key={leave.id} className="cursor-pointer hover:bg-muted/5"
+                          onClick={() => setExpandedId(expandedId === leave.id ? null : leave.id)}>
+                          {isAdminOrManager && (
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold uppercase">
+                                  {leave.username?.substring(0, 2)}
+                                </div>
+                                <span className="font-medium text-sm">{leave.username}</span>
                               </div>
+                            </TableCell>
+                          )}
+                          <TableCell className="text-sm">
+                            <div>{formatDate(leave.startDate)}</div>
+                            {leave.startDate !== leave.endDate && (
+                              <div className="text-muted-foreground text-xs">to {formatDate(leave.endDate)}</div>
                             )}
-                            {leave.isLop && (
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">Leave Type</p>
-                                <p className="text-orange-400 font-medium">Includes Loss of Pay days</p>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-semibold">{leave.days}</span>
+                            <span className="text-muted-foreground text-xs ml-1">day{leave.days > 1 ? "s" : ""}</span>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground max-w-[180px] truncate">
+                            {leave.reason || "—"}
+                          </TableCell>
+                          <TableCell><StatusBadge status={leave.status} isLop={leave.isLop} /></TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {leave.createdAt ? formatDate(leave.createdAt) : "—"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {isAdminOrManager && leave.status === "pending" && (
+                                <Button size="sm" variant="ghost" className="text-emerald-400 hover:text-emerald-400 hover:bg-emerald-400/10"
+                                  onClick={(e) => { e.stopPropagation(); setReviewLeave(leave); setManagerNote(""); }}>
+                                  Review
+                                </Button>
+                              )}
+                              {!isAdminOrManager && leave.status === "pending" && (
+                                <Button size="sm" variant="ghost"
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  onClick={(e) => { e.stopPropagation(); handleCancel(leave.id); }}
+                                  disabled={cancelLeave.isPending}>
+                                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Cancel
+                                </Button>
+                              )}
+                              <Button size="sm" variant="ghost" className="text-muted-foreground px-2"
+                                onClick={(e) => { e.stopPropagation(); setExpandedId(expandedId === leave.id ? null : leave.id); }}>
+                                {expandedId === leave.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {expandedId === leave.id && (
+                          <TableRow key={`${leave.id}-detail`} className="bg-muted/5">
+                            <TableCell colSpan={isAdminOrManager ? 7 : 6} className="py-3 px-6">
+                              <div className="flex flex-wrap gap-6 text-sm">
+                                {leave.reason && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">Reason</p>
+                                    <p>{leave.reason}</p>
+                                  </div>
+                                )}
+                                {leave.isLop && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">Leave Type</p>
+                                    <p className="text-orange-400 font-medium">Includes Loss of Pay days</p>
+                                  </div>
+                                )}
+                                {leave.managerNote && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">Manager Note</p>
+                                    <p>{leave.managerNote}</p>
+                                  </div>
+                                )}
+                                {isAdminOrManager && leave.managerName && (
+                                  <div>
+                                    <p className="text-xs text-muted-foreground mb-0.5">Reviewed By</p>
+                                    <p>{leave.managerName}</p>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                            {leave.managerNote && (
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">Manager Note</p>
-                                <p>{leave.managerNote}</p>
-                              </div>
-                            )}
-                            {isAdminOrManager && leave.managerName && (
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-0.5">Reviewed By</p>
-                                <p>{leave.managerName}</p>
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       {/* Apply Leave Dialog */}
       <Dialog open={isApplyOpen} onOpenChange={(o) => { setIsApplyOpen(o); if (!o) setApplyForm({ startDate: "", endDate: "", reason: "" }); }}>
