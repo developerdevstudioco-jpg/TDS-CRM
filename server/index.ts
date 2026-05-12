@@ -79,12 +79,16 @@ app.use('/uploads/pdfs', express.static(join(process.cwd(), 'uploads/pdfs')));
 app.use(express.static(clientDistPath));
 log(`ℹ React frontend will be served from ${clientDistPath}`);
 
+// --- Start server IMMEDIATELY so Render detects the open port ---
+const port = parseInt(process.env.PORT || "5000", 10);
+httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
+
 // --- Async startup: DB, migrations, API routes ---
 (async () => {
   try {
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) {
-      log("❌ DATABASE_URL not set!");
+      log("❌ DATABASE_URL not set! API routes will not be available.");
       return;
     }
 
@@ -97,6 +101,7 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
       log("✅ DB connected");
     } catch (err: any) {
       log("❌ DB connection failed: " + (err.message || err));
+      // Do NOT return — server is already listening, frontend still works
       return;
     }
 
@@ -142,9 +147,7 @@ log(`ℹ React frontend will be served from ${clientDistPath}`);
       res.sendFile(join(clientDistPath, "index.html"));
     });
 
-    // --- Start server (MUST be after all routes are registered) ---
-    const port = parseInt(process.env.PORT || "5000", 10);
-    httpServer.listen(port, "0.0.0.0", () => log(`🚀 Server listening on port ${port}`));
+    log("✅ All async startup complete");
 
   } catch (err: any) {
     log("❌ Fatal startup error: " + (err.message || err));
