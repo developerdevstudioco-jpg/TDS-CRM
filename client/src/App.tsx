@@ -20,6 +20,7 @@ import Leads from "@/pages/leads";
 import Templates from "@/pages/templates";
 import Users from "@/pages/users";
 import Report from "@/pages/report";
+import Leave from "@/pages/leave";
 
 function Router() {
   const { user, isLoading } = useAuth();
@@ -52,6 +53,7 @@ function Router() {
         <Route path="/templates" component={Templates} />
         <Route path="/users" component={Users} />
         <Route path="/report" component={Report} />
+        <Route path="/leave" component={Leave} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
