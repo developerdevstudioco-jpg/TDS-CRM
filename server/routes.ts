@@ -90,6 +90,123 @@ export async function registerRoutes(
   // Assignable users — any authenticated user can call this.
   // Admin/manager: returns all users.
   // User role: returns their own manager + anyone who reports to that manager.
+  // ─── ADD THIS TO server/routes.ts (inside registerRoutes function) ───────────
+
+  // ── Leave Requests ──────────────────────────────────────────────────────────
+
+  // GET /api/leaves — user sees own, manager sees their team's, admin sees all
+  app.get('/api/leaves', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      let leaves;
+      if (currentUser.role === 'admin') {
+        leaves = await storage.getLeaveRequests();
+      } else if (currentUser.role === 'manager') {
+        leaves = await storage.getLeaveRequests({ managerId: currentUser.id });
+      } else {
+        leaves = await storage.getLeaveRequests({ userId: currentUser.id });
+      }
+      res.json(leaves);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch leaves" });
+    }
+  });
+
+  // POST /api/leaves — user applies for leave
+  app.post('/api/leaves', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const { startDate, endDate, reason } = req.body;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "Start and end date are required" });
+      }
+
+      // Calculate working days (Mon–Sat, skip Sunday)
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      let days = 0;
+      const cur = new Date(start);
+      while (cur <= end) {
+        if (cur.getDay() !== 0) days++; // 0 = Sunday
+        cur.setDate(cur.getDate() + 1);
+      }
+
+      if (days === 0) {
+        return res.status(400).json({ message: "No working days in selected range (Sundays excluded)" });
+      }
+
+      // Check monthly leave quota (max 2 per month)
+      const month = start.getMonth() + 1;
+      const year = start.getFullYear();
+      const usedDays = await storage.getMonthlyLeaveCount(currentUser.id, year, month);
+      const remaining = Math.max(0, 2 - usedDays);
+      const lopDays = Math.max(0, days - remaining);
+      const isLop = lopDays > 0;
+
+      // Find manager: user's managerId, or first manager/admin
+      let managerId = currentUser.managerId || null;
+      if (!managerId) {
+        const allUsers = await storage.getUsers();
+        const mgr = allUsers.find((u: any) => u.role === 'manager' || u.role === 'admin');
+        managerId = mgr?.id || null;
+      }
+
+      const leave = await storage.createLeaveRequest({
+        userId: currentUser.id,
+        managerId,
+        startDate,
+        endDate,
+        days,
+        reason: reason || null,
+        status: 'pending',
+        isLop,
+      });
+
+      res.status(201).json({ ...leave, lopDays, remaining });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to apply leave" });
+    }
+  });
+
+  // PATCH /api/leaves/:id — manager/admin approves or rejects
+  app.patch('/api/leaves/:id', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (currentUser.role === 'user') {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      const id = Number(req.params.id);
+      const { status, managerNote } = req.body;
+      if (!['approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: "Status must be approved or rejected" });
+      }
+      const leave = await storage.updateLeaveRequest(id, { status, managerNote: managerNote || null });
+      res.json(leave);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to update leave" });
+    }
+  });
+
+  // DELETE /api/leaves/:id — user can cancel their own pending leave
+  app.delete('/api/leaves/:id', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const id = Number(req.params.id);
+      const leave = await storage.getLeaveRequest(id);
+      if (!leave) return res.status(404).json({ message: "Leave not found" });
+      if (leave.userId !== currentUser.id && currentUser.role === 'user') {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      if (leave.status !== 'pending') {
+        return res.status(400).json({ message: "Only pending leaves can be cancelled" });
+      }
+      await storage.updateLeaveRequest(id, { status: 'rejected', managerNote: 'Cancelled by user' });
+      res.status(204).end();
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to cancel leave" });
+    }
+  });
   app.get('/api/users/assignable', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;

@@ -8,6 +8,11 @@ import {
 } from "@shared/schema";
 import { eq, desc, inArray, and, gte, lt, sql } from "drizzle-orm";
 
+export type LeaveRequestWithUser = LeaveRequest & {
+  username?: string;
+  managerName?: string;
+};
+
 export type LeadActivityWithUser = LeadActivity & { username?: string };
 export type LeadWithUser = Lead & { assignedUsername?: string | null };
 
@@ -237,5 +242,82 @@ export class DatabaseStorage implements IStorage {
     await db.delete(templates).where(eq(templates.id, id));
   }
 }
+
+// 4. Add these methods to DatabaseStorage class:
+ 
+async getLeaveRequests(options?: { userId?: number; managerId?: number; status?: string }): Promise<LeaveRequestWithUser[]> {
+  const managerAlias = alias(users, "manager");
+  let query = db
+    .select({
+      id: leaveRequests.id,
+      userId: leaveRequests.userId,
+      managerId: leaveRequests.managerId,
+      startDate: leaveRequests.startDate,
+      endDate: leaveRequests.endDate,
+      days: leaveRequests.days,
+      reason: leaveRequests.reason,
+      status: leaveRequests.status,
+      isLop: leaveRequests.isLop,
+      managerNote: leaveRequests.managerNote,
+      createdAt: leaveRequests.createdAt,
+      updatedAt: leaveRequests.updatedAt,
+      username: users.username,
+      managerName: managerAlias.username,
+    })
+    .from(leaveRequests)
+    .leftJoin(users, eq(leaveRequests.userId, users.id))
+    .leftJoin(managerAlias, eq(leaveRequests.managerId, managerAlias.id))
+    .orderBy(desc(leaveRequests.createdAt));
+ 
+  const conditions = [];
+  if (options?.userId !== undefined) conditions.push(eq(leaveRequests.userId, options.userId));
+  if (options?.managerId !== undefined) conditions.push(eq(leaveRequests.managerId, options.managerId));
+  if (options?.status) conditions.push(eq(leaveRequests.status, options.status));
+ 
+  if (conditions.length > 0) {
+    return await (query as any).where(and(...conditions));
+  }
+  return await query;
+}
+ 
+async getLeaveRequest(id: number): Promise<LeaveRequest | undefined> {
+  const [leave] = await db.select().from(leaveRequests).where(eq(leaveRequests.id, id));
+  return leave;
+}
+ 
+async createLeaveRequest(data: InsertLeaveRequest): Promise<LeaveRequest> {
+  const [leave] = await db.insert(leaveRequests).values(data).returning();
+  return leave;
+}
+ 
+async updateLeaveRequest(id: number, updates: Partial<LeaveRequest>): Promise<LeaveRequest> {
+  const [updated] = await db
+    .update(leaveRequests)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(leaveRequests.id, id))
+    .returning();
+  if (!updated) throw new Error("Leave request not found");
+  return updated;
+}
+ 
+async getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number> {
+  // Count approved/pending leave days in the given month
+  const from = new Date(year, month - 1, 1).toISOString().split('T')[0];
+  const to = new Date(year, month, 0).toISOString().split('T')[0];
+  const rows = await db
+    .select({ days: leaveRequests.days })
+    .from(leaveRequests)
+    .where(
+      and(
+        eq(leaveRequests.userId, userId),
+        gte(leaveRequests.startDate, from),
+        lt(leaveRequests.startDate, to),
+        // Count both pending and approved (not rejected)
+        sql`${leaveRequests.status} != 'rejected'`
+      )
+    );
+  return rows.reduce((sum, r) => sum + r.days, 0);
+}
+ 
 
 export const storage = new DatabaseStorage();

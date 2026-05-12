@@ -84,3 +84,26 @@ export type CreateLeadRequest = InsertLead;
 export type UpdateLeadRequest = Partial<InsertLead>;
 export type LeadResponse = Lead;
 export type LeadsListResponse = Lead[];
+
+// ─── ADD THIS TO shared/schema.ts ───────────────────────────────────────────
+// Add these imports to the existing drizzle imports at the top if not already present:
+// import { pgTable, serial, integer, text, date, timestamp } from "drizzle-orm/pg-core";
+ 
+export const leaveRequests = pgTable("leave_requests", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  managerId: integer("manager_id").references(() => users.id),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  days: integer("days").notNull(),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected
+  isLop: boolean("is_lop").notNull().default(false),   // Loss of Pay
+  managerNote: text("manager_note"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+ 
+export type LeaveRequest = typeof leaveRequests.$inferSelect;
+export type InsertLeaveRequest = typeof leaveRequests.$inferInsert;
+ 
