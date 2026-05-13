@@ -318,7 +318,7 @@ function LeaveCalendar({
 }
 
 // ── Team Calendar (manager read-only view) ───────────────────────────────────
-function TeamCalendar({ leaves, members }: { leaves: LeaveRequest[]; members: { id: number; username: string }[] }) {
+function TeamCalendar({ leaves, members, leads }: { leaves: LeaveRequest[]; members: { id: number; username: string }[]; leads: Lead[] }) {
   const today = new Date();
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
@@ -354,6 +354,25 @@ function TeamCalendar({ leaves, members }: { leaves: LeaveRequest[]; members: { 
     return map;
   }, [leaves, selectedMember]);
 
+  // Map: dateKey -> list of usernames with overdue/today follow-ups
+  const redDayMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    const todayKey = toDateKey(today);
+    // Build userId -> username lookup
+    const memberMap = Object.fromEntries(members.map(m => [m.id, m.username]));
+    for (const lead of leads) {
+      if (!lead.followUpDate || !lead.assignedTo) continue;
+      if (selectedMember !== "all" && lead.assignedTo !== selectedMember) continue;
+      const fKey = toDateKey(new Date(lead.followUpDate));
+      if (fKey <= todayKey) {
+        const name = memberMap[lead.assignedTo] || String(lead.assignedTo);
+        if (!map.has(fKey)) map.set(fKey, []);
+        if (!map.get(fKey)!.includes(name)) map.get(fKey)!.push(name);
+      }
+    }
+    return map;
+  }, [leads, members, selectedMember]);
+
   const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); };
   const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); };
 
@@ -387,30 +406,41 @@ function TeamCalendar({ leaves, members }: { leaves: LeaveRequest[]; members: { 
             if (!day) return <div key={`empty-${i}`} />;
             const key = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
             const names = leaveDayMap.get(key) || [];
+            const redNames = redDayMap.get(key) || [];
             const isLeave = names.length > 0;
+            const isRed = redNames.length > 0;
             const isToday = key === todayKey;
             const isSunday = new Date(calYear, calMonth, day).getDay() === 0;
 
             let cellClass = "relative group flex flex-col items-center justify-start h-10 w-full rounded-lg text-xs font-medium transition-colors pt-1 ";
-            if (isLeave) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            if (isLeave && isRed) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            else if (isLeave) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            else if (isRed) cellClass += "bg-red-500/20 text-red-400 border border-red-500/30 cursor-pointer";
             else if (isToday) cellClass += "bg-primary/20 text-primary border border-primary/30 font-bold";
             else if (isSunday) cellClass += "text-muted-foreground/40";
             else cellClass += "text-foreground/70";
 
+            const tooltipNames = [
+              ...names.map(n => "🏖 " + n + " (leave)"),
+              ...redNames.map(n => "⚠ " + n + " (follow-up)"),
+            ];
+
             return (
-              <div key={key} className={cellClass} title={names.join(", ")}>
+              <div key={key} className={cellClass} title={tooltipNames.join(", ")}>
                 {day}
-                {isLeave && (
-                  <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center">
-                    {names.slice(0, 3).map((n, idx) => (
-                      <span key={idx} className="h-1.5 w-1.5 rounded-full bg-pink-400" />
-                    ))}
-                    {names.length > 3 && <span className="text-[8px] text-pink-400">+{names.length - 3}</span>}
-                  </div>
-                )}
-                {isLeave && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:flex flex-col bg-popover border border-border rounded-lg px-2 py-1.5 shadow-lg z-10 whitespace-nowrap text-[10px] text-foreground">
-                    {names.map((n, idx) => <span key={idx}>🏖 {n}</span>)}
+                <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center">
+                  {names.slice(0, 2).map((n, idx) => (
+                    <span key={"l"+idx} className="h-1.5 w-1.5 rounded-full bg-pink-400" />
+                  ))}
+                  {redNames.slice(0, 2).map((n, idx) => (
+                    <span key={"r"+idx} className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                  ))}
+                  {(names.length + redNames.length) > 4 && <span className="text-[8px] text-muted-foreground">+{names.length + redNames.length - 4}</span>}
+                </div>
+                {(isLeave || isRed) && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:flex flex-col bg-popover border border-border rounded-lg px-2 py-1.5 shadow-lg z-10 whitespace-nowrap text-[10px] text-foreground gap-0.5">
+                    {names.map((n, idx) => <span key={"lt"+idx}>🏖 {n} <span className="text-muted-foreground">(leave)</span></span>)}
+                    {redNames.map((n, idx) => <span key={"rt"+idx}>⚠ {n} <span className="text-red-400">(follow-up due)</span></span>)}
                   </div>
                 )}
               </div>
@@ -426,7 +456,11 @@ function TeamCalendar({ leaves, members }: { leaves: LeaveRequest[]; members: { 
             <div className="h-3 w-3 rounded-sm bg-primary/20 border border-primary/30" />
             <span className="text-[10px] text-muted-foreground">Today</span>
           </div>
-          <span className="text-[10px] text-muted-foreground ml-auto">Hover date to see names</span>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-red-500/30 border border-red-500/40" />
+            <span className="text-[10px] text-muted-foreground">Follow-up due</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground ml-auto">Hover to see names</span>
         </div>
       </CardContent>
     </Card>
@@ -603,7 +637,7 @@ export default function Leave() {
 
       {/* Team Calendar — manager/admin only */}
       {isAdminOrManager && leaves && (
-        <TeamCalendar leaves={leaves} members={teamMembers} />
+        <TeamCalendar leaves={leaves} members={teamMembers} leads={leads} />
       )}
 
       {/* Calendar + Table layout */}
