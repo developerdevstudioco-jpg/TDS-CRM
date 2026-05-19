@@ -116,7 +116,7 @@ export async function registerRoutes(
   };
 
   // ── Users ───────────────────────────────────────────────────────────────────
-  app.get(api.users.list.path, requireAdminOrManager, async (req, res) => {
+  app.get(api.users.list.path, requireAuth, async (req, res) => {
     try {
       const users = await storage.getUsers();
       res.status(200).json(users);
@@ -132,7 +132,12 @@ export async function registerRoutes(
       const existing = await storage.getUserByUsername(username);
       if (existing) return res.status(400).json({ message: "Username already exists" });
       const hashed = await hashPassword(password);
-      const user = await storage.createUser({ username, password: hashed, role: role || "user", managerId: managerId || null });
+      const user = await storage.createUser({
+        username,
+        password: hashed,
+        role: role || "user",
+        managerId: managerId || null,
+      });
       res.status(201).json(user);
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to create user" });
@@ -164,14 +169,34 @@ export async function registerRoutes(
   });
 
   // ── Leads ───────────────────────────────────────────────────────────────────
+  // NOTE: bulk and upload routes MUST come before /:id routes to avoid conflict
+  app.post(api.leads.bulkUpdate.path, requireAdminOrManager, async (req, res) => {
+    try {
+      const { ids, updates } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0)
+        return res.status(400).json({ message: "No lead IDs provided" });
+      await storage.bulkUpdateLeads(ids, updates);
+      res.status(200).json({ message: "Leads updated" });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to bulk update leads" });
+    }
+  });
+
+  app.post(api.leads.uploadCsv.path, requireAdminOrManager, upload.single("csv"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      // CSV parsing handled client-side; this endpoint just acknowledges
+      res.status(200).json({ count: 0 });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to upload CSV" });
+    }
+  });
+
   app.get(api.leads.list.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
       let leads;
-      if (currentUser.role === "admin") {
-        leads = await storage.getLeads();
-      } else if (currentUser.role === "manager") {
-        // Managers see all leads (to assign/manage)
+      if (currentUser.role === "admin" || currentUser.role === "manager") {
         leads = await storage.getLeads();
       } else {
         leads = await storage.getLeads({ assignedTo: currentUser.id });
@@ -183,26 +208,14 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.leads.get.path, requireAuth, async (req, res) => {
-    try {
-      const lead = await storage.getLead(Number(req.params.id));
-      if (!lead) return res.status(404).json({ message: "Lead not found" });
-      res.status(200).json(lead);
-    } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to fetch lead" });
-    }
-  });
-
   app.post(api.leads.create.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      const data = req.body;
-      // If not admin/manager, force assignedTo to self
+      const data = { ...req.body };
       if (currentUser.role === "user") {
         data.assignedTo = currentUser.id;
       }
       const lead = await storage.createLead(data);
-      // Log creation activity
       await storage.createLeadActivity({
         leadId: lead.id,
         userId: currentUser.id,
@@ -217,18 +230,24 @@ export async function registerRoutes(
     }
   });
 
+  app.get(api.leads.get.path, requireAuth, async (req, res) => {
+    try {
+      const lead = await storage.getLead(Number(req.params.id));
+      if (!lead) return res.status(404).json({ message: "Lead not found" });
+      res.status(200).json(lead);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch lead" });
+    }
+  });
+
   app.patch(api.leads.update.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
       const id = Number(req.params.id);
       const updates = req.body;
-
       const existing = await storage.getLead(id);
       if (!existing) return res.status(404).json({ message: "Lead not found" });
-
       const lead = await storage.updateLead(id, updates);
-
-      // Log status change activity
       if (updates.status && updates.status !== existing.status) {
         await storage.createLeadActivity({
           leadId: id,
@@ -237,8 +256,6 @@ export async function registerRoutes(
           content: `Status changed from ${existing.status} to ${updates.status}`,
         });
       }
-
-      // Log follow-up set activity
       if (updates.followUpDate && updates.followUpDate !== existing.followUpDate) {
         await storage.createLeadActivity({
           leadId: id,
@@ -247,23 +264,11 @@ export async function registerRoutes(
           content: `Follow-up set for ${new Date(updates.followUpDate).toLocaleDateString()}`,
         });
       }
-
       res.status(200).json(lead);
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       console.error("lead update error:", err);
       res.status(500).json({ message: err?.message || "Failed to update lead" });
-    }
-  });
-
-  app.post(api.leads.bulkUpdate.path, requireAdminOrManager, async (req, res) => {
-    try {
-      const { ids, updates } = req.body;
-      if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: "No lead IDs provided" });
-      await storage.bulkUpdateLeads(ids, updates);
-      res.status(200).json({ message: "Leads updated" });
-    } catch (err: any) {
-      res.status(500).json({ message: err?.message || "Failed to bulk update leads" });
     }
   });
 
@@ -276,24 +281,22 @@ export async function registerRoutes(
     }
   });
 
-  // ── Lead Activities ─────────────────────────────────────────────────────────
-  app.get(api.leadActivities.list.path, requireAuth, async (req, res) => {
+  // ── Lead Activities — path uses :id (not :leadId) per shared/routes ─────────
+  app.get(api.leads.activities.list.path, requireAuth, async (req, res) => {
     try {
-      const leadId = Number(req.params.leadId);
-      const activities = await storage.getLeadActivities(leadId);
+      const activities = await storage.getLeadActivities(Number(req.params.id));
       res.status(200).json(activities);
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to fetch activities" });
     }
   });
 
-  app.post(api.leadActivities.create.path, requireAuth, async (req, res) => {
+  app.post(api.leads.activities.create.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      const leadId = Number(req.params.leadId);
       const { type, content } = req.body;
       const activity = await storage.createLeadActivity({
-        leadId,
+        leadId: Number(req.params.id),
         userId: currentUser.id,
         type,
         content: content || null,
@@ -319,7 +322,12 @@ export async function registerRoutes(
     try {
       const { name, content, pdfUrl, pdfName } = req.body;
       if (!name || !content) return res.status(400).json({ message: "Name and content are required" });
-      const template = await storage.createTemplate({ name, content, pdfUrl: pdfUrl || null, pdfName: pdfName || null });
+      const template = await storage.createTemplate({
+        name,
+        content,
+        pdfUrl: pdfUrl || null,
+        pdfName: pdfName || null,
+      });
       res.status(201).json(template);
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -337,7 +345,7 @@ export async function registerRoutes(
     }
   });
 
-  // PDF upload
+  // ── PDF Upload ──────────────────────────────────────────────────────────────
   app.post('/api/upload/pdf', requireAuth, uploadPdf.single('pdf'), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -373,7 +381,8 @@ export async function registerRoutes(
       const targetId = Number(req.params.id);
       if (currentUser.role === 'manager') {
         const myUsers = await storage.getUsersByManager(currentUser.id);
-        if (!myUsers.some(u => u.id === targetId)) return res.status(403).json({ message: "Not authorized" });
+        if (!myUsers.some(u => u.id === targetId))
+          return res.status(403).json({ message: "Not authorized" });
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
@@ -393,7 +402,8 @@ export async function registerRoutes(
       const targetId = Number(req.params.id);
       if (currentUser.role === 'manager') {
         const myUsers = await storage.getUsersByManager(currentUser.id);
-        if (!myUsers.some((u: any) => u.id === targetId)) return res.status(403).json({ message: "Not authorized" });
+        if (!myUsers.some((u: any) => u.id === targetId))
+          return res.status(403).json({ message: "Not authorized" });
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
@@ -438,7 +448,8 @@ export async function registerRoutes(
         targetId = Number(queryUserId);
         if (currentUser.role === 'manager') {
           const myUsers = await storage.getUsersByManager(currentUser.id);
-          if (!myUsers.some((u: any) => u.id === targetId)) return res.status(403).json({ message: "Not authorized" });
+          if (!myUsers.some((u: any) => u.id === targetId))
+            return res.status(403).json({ message: "Not authorized" });
         } else if (currentUser.role !== 'admin' && targetId !== currentUser.id) {
           return res.status(403).json({ message: "Not authorized" });
         }
@@ -466,13 +477,17 @@ export async function registerRoutes(
     }
   });
 
+  // Reports: my-users — manager sees their assigned users, admin sees all non-admin users
   app.get('/api/reports/my-users', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
       if (currentUser.role === 'manager') {
-        return res.status(200).json(await storage.getUsersByManager(currentUser.id));
+        const myUsers = await storage.getUsersByManager(currentUser.id);
+        return res.status(200).json(myUsers);
       } else if (currentUser.role === 'admin') {
-        return res.status(200).json(await storage.getUsers());
+        const allUsers = await storage.getUsers();
+        // Admin sees all non-admin users
+        return res.status(200).json(allUsers.filter((u: any) => u.role !== 'admin'));
       }
       return res.status(403).json({ message: "Not authorized" });
     } catch (err: any) {
@@ -553,7 +568,8 @@ export async function registerRoutes(
       if (currentUser.role === 'user') return res.status(403).json({ message: "Not authorized" });
       const id = Number(req.params.id);
       const { status, managerNote } = req.body;
-      if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ message: "Status must be approved or rejected" });
+      if (!['approved', 'rejected'].includes(status))
+        return res.status(400).json({ message: "Status must be approved or rejected" });
       const leave = await storage.updateLeaveRequest(id, { status, managerNote: managerNote || null });
       res.json(leave);
     } catch (err: any) {
@@ -567,8 +583,10 @@ export async function registerRoutes(
       const id = Number(req.params.id);
       const leave = await storage.getLeaveRequest(id);
       if (!leave) return res.status(404).json({ message: "Leave not found" });
-      if (leave.userId !== currentUser.id && currentUser.role === 'user') return res.status(403).json({ message: "Not authorized" });
-      if (leave.status !== 'pending') return res.status(400).json({ message: "Only pending leaves can be cancelled" });
+      if (leave.userId !== currentUser.id && currentUser.role === 'user')
+        return res.status(403).json({ message: "Not authorized" });
+      if (leave.status !== 'pending')
+        return res.status(400).json({ message: "Only pending leaves can be cancelled" });
       await storage.updateLeaveRequest(id, { status: 'rejected', managerNote: 'Cancelled by user' });
       res.status(204).end();
     } catch (err: any) {
@@ -583,7 +601,8 @@ export async function registerRoutes(
       let targetUserId = currentUser.id;
       if (req.query.userId) {
         const requestedId = Number(req.query.userId);
-        if (currentUser.role === 'user' && requestedId !== currentUser.id) return res.status(403).json({ message: "Not authorized" });
+        if (currentUser.role === 'user' && requestedId !== currentUser.id)
+          return res.status(403).json({ message: "Not authorized" });
         targetUserId = requestedId;
       }
       const days = await storage.getMissedFollowupDays(targetUserId);
