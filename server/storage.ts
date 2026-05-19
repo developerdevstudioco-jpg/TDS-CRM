@@ -5,9 +5,21 @@ import {
   type Lead, type InsertLead, type UpdateLeadRequest,
   type Template, type InsertTemplate,
   type LeadActivity, type InsertLeadActivity,
-  type LeaveRequest, type InsertLeaveRequest,
+  type LeaveRequest, type InsertLeaveRequest
 } from "@shared/schema";
-import { eq, desc, inArray, and, gte, lt, sql } from "drizzle-orm";
+import { eq, desc, inArray, and, gte, lt, lte, sql } from "drizzle-orm";
+import { pgTable, serial, integer, date, timestamp } from "drizzle-orm/pg-core";
+
+// ── missed_followup_days table (inline definition) ────────────────────────────
+export const missedFollowupDays = pgTable("missed_followup_days", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  missedDate: date("missed_date").notNull(),
+  leadCount: integer("lead_count").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MissedFollowupDay = typeof missedFollowupDays.$inferSelect;
 
 export type LeadActivityWithUser = LeadActivity & { username?: string };
 export type LeadWithUser = Lead & { assignedUsername?: string | null };
@@ -58,9 +70,14 @@ export interface IStorage {
   // Leave Requests
   getLeaveRequests(options?: { userId?: number; managerId?: number }): Promise<LeaveRequest[]>;
   getLeaveRequest(id: number): Promise<LeaveRequest | undefined>;
-  createLeaveRequest(leave: InsertLeaveRequest): Promise<LeaveRequest>;
+  createLeaveRequest(leave: Omit<InsertLeaveRequest, 'id' | 'createdAt' | 'updatedAt'>): Promise<LeaveRequest>;
   updateLeaveRequest(id: number, updates: Partial<InsertLeaveRequest>): Promise<LeaveRequest>;
   getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number>;
+
+  // Missed Follow-up Days (KPI)
+  stampMissedFollowupDay(userId: number, missedDate: string, leadCount: number): Promise<void>;
+  getMissedFollowupDays(userId: number): Promise<MissedFollowupDay[]>;
+  getOverdueFollowupLeads(): Promise<{ userId: number; count: number }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -172,7 +189,6 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  // ✅ NEW METHOD ADDED
   async getActivitiesByUserInRange(userId: number, from: Date, to: Date): Promise<LeadActivity[]> {
     return await db
       .select()
@@ -207,14 +223,8 @@ export class DatabaseStorage implements IStorage {
       );
 
     const summary: ActivitySummary = {
-      calls: 0,
-      whatsapp: 0,
-      sms: 0,
-      leadsCreated: 0,
-      statusChanges: 0,
-      notesAdded: 0,
-      followUpsSet: 0,
-      total: 0,
+      calls: 0, whatsapp: 0, sms: 0, leadsCreated: 0,
+      statusChanges: 0, notesAdded: 0, followUpsSet: 0, total: 0,
     };
 
     for (const a of activities) {
@@ -245,7 +255,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(templates).where(eq(templates.id, id));
   }
 
-  // Leave Requests
+  // ── Leave Requests ──────────────────────────────────────────────────────────
   async getLeaveRequests(options?: { userId?: number; managerId?: number }): Promise<LeaveRequest[]> {
     if (options?.userId !== undefined) {
       return await db.select().from(leaveRequests)
@@ -265,21 +275,24 @@ export class DatabaseStorage implements IStorage {
     return leave;
   }
 
-  async createLeaveRequest(leave: InsertLeaveRequest): Promise<LeaveRequest> {
+  async createLeaveRequest(leave: Omit<InsertLeaveRequest, 'id' | 'createdAt' | 'updatedAt'>): Promise<LeaveRequest> {
     const [created] = await db.insert(leaveRequests).values(leave).returning();
     return created;
   }
 
   async updateLeaveRequest(id: number, updates: Partial<InsertLeaveRequest>): Promise<LeaveRequest> {
-    const [updated] = await db.update(leaveRequests).set(updates).where(eq(leaveRequests.id, id)).returning();
+    const [updated] = await db.update(leaveRequests)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(leaveRequests.id, id))
+      .returning();
     if (!updated) throw new Error("Leave request not found");
     return updated;
   }
 
   async getMonthlyLeaveCount(userId: number, year: number, month: number): Promise<number> {
-    // Count approved/pending leave days for the given user in the given month
     const from = new Date(year, month - 1, 1);
     const to = new Date(year, month, 1);
+
     const rows = await db.select({ days: leaveRequests.days })
       .from(leaveRequests)
       .where(
@@ -287,13 +300,57 @@ export class DatabaseStorage implements IStorage {
           eq(leaveRequests.userId, userId),
           gte(leaveRequests.startDate, from.toISOString().split("T")[0]),
           lt(leaveRequests.startDate, to.toISOString().split("T")[0]),
-          inArray(leaveRequests.status, ["pending", "approved"])
+          sql`${leaveRequests.status} != 'rejected'`
         )
       );
+
     return rows.reduce((sum, r) => sum + (r.days ?? 0), 0);
+  }
+
+  // ── Missed Follow-up Days (KPI) ─────────────────────────────────────────────
+
+  // Upserts a missed day record for a user — called by nightly cron
+  async stampMissedFollowupDay(userId: number, missedDate: string, leadCount: number): Promise<void> {
+    await db.execute(sql`
+      INSERT INTO missed_followup_days (user_id, missed_date, lead_count)
+      VALUES (${userId}, ${missedDate}::date, ${leadCount})
+      ON CONFLICT (user_id, missed_date)
+      DO UPDATE SET lead_count = EXCLUDED.lead_count
+    `);
+  }
+
+  // Returns all stamped missed days for a user
+  async getMissedFollowupDays(userId: number): Promise<MissedFollowupDay[]> {
+    return await db.select()
+      .from(missedFollowupDays)
+      .where(eq(missedFollowupDays.userId, userId))
+      .orderBy(desc(missedFollowupDays.missedDate));
+  }
+
+  // Returns overdue follow-up counts per user — used by cron at end of day
+  async getOverdueFollowupLeads(): Promise<{ userId: number; count: number }[]> {
+    const now = new Date();
+    // Use end of today so we capture today's uncleared follow-ups too
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const rows = await db.select({
+      userId: leads.assignedTo,
+      count: sql<number>`cast(count(*) as int)`,
+    })
+      .from(leads)
+      .where(
+        and(
+          lte(leads.followUpDate, endOfToday),
+          sql`${leads.followUpDate} IS NOT NULL`,
+          sql`${leads.assignedTo} IS NOT NULL`
+        )
+      )
+      .groupBy(leads.assignedTo);
+
+    return rows
+      .filter(r => r.userId !== null)
+      .map(r => ({ userId: r.userId as number, count: r.count }));
   }
 }
 
 export const storage = new DatabaseStorage();
-// Patch: Add leave methods to IStorage interface and DatabaseStorage
-// (Done via runtime augmentation since interface is already compiled)

@@ -7,7 +7,6 @@ import { z } from "zod";
 import passport from "passport";
 import multer from "multer";
 import fs from "fs";
-
 import path from "path";
 
 const storage_disk = multer.diskStorage({
@@ -28,11 +27,51 @@ const uploadPdf = multer({ storage: storage_disk, fileFilter: (req, file, cb) =>
   else cb(new Error("Only PDF files are allowed"));
 }});
 
+// ── Nightly KPI cron job ──────────────────────────────────────────────────────
+// Runs at 11:59 PM every day. Stamps any user who still has overdue/today
+// follow-ups as a "missed day" — this record is permanent for KPI tracking.
+function scheduleMissedFollowupStamp() {
+  function msUntil(hour: number, minute: number): number {
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+    if (target <= now) target.setDate(target.getDate() + 1);
+    return target.getTime() - now.getTime();
+  }
+
+  function runStamp() {
+    const todayKey = new Date().toISOString().split("T")[0];
+    console.log(`[cron] Stamping missed follow-up days for ${todayKey}`);
+    storage.getOverdueFollowupLeads().then(async (rows) => {
+      for (const { userId, count } of rows) {
+        try {
+          await storage.stampMissedFollowupDay(userId, todayKey, count);
+          console.log(`[cron] Stamped user ${userId} — ${count} overdue lead(s) on ${todayKey}`);
+        } catch (err) {
+          console.error(`[cron] Failed to stamp user ${userId}:`, err);
+        }
+      }
+    }).catch(err => console.error("[cron] getOverdueFollowupLeads error:", err));
+  }
+
+  // Schedule first run at 23:59
+  setTimeout(function tick() {
+    runStamp();
+    // Then repeat every 24 hours
+    setTimeout(tick, 24 * 60 * 60 * 1000);
+  }, msUntil(23, 59));
+
+  console.log(`[cron] Missed follow-up stamp scheduled — next run in ${Math.round(msUntil(23, 59) / 60000)} min`);
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   await setupAuth(app);
+
+  // Start the nightly cron job
+  scheduleMissedFollowupStamp();
 
   // Auth Routes
   app.post(api.auth.login.path, (req, res, next) => {
@@ -87,11 +126,6 @@ export async function registerRoutes(
     res.status(200).json(users);
   });
 
-  // Assignable users — any authenticated user can call this.
-  // Admin/manager: returns all users.
-  // User role: returns their own manager + anyone who reports to that manager.
-  // ─── ADD THIS TO server/routes.ts (inside registerRoutes function) ───────────
-
   // ── Leave Requests ──────────────────────────────────────────────────────────
 
   // GET /api/leaves — user sees own, manager sees their team's, admin sees all
@@ -106,7 +140,6 @@ export async function registerRoutes(
       } else {
         leaves = await storage.getLeaveRequests({ userId: currentUser.id });
       }
-      // Enrich with usernames
       const allUsers = await storage.getUsers();
       const userMap = Object.fromEntries(allUsers.map((u: any) => [u.id, u.username]));
       const enriched = leaves.map((l: any) => ({
@@ -130,13 +163,12 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Start and end date are required" });
       }
 
-      // Calculate working days (Mon–Sat, skip Sunday)
       const start = new Date(startDate);
       const end = new Date(endDate);
       let days = 0;
       const cur = new Date(start);
       while (cur <= end) {
-        if (cur.getDay() !== 0) days++; // 0 = Sunday
+        if (cur.getDay() !== 0) days++;
         cur.setDate(cur.getDate() + 1);
       }
 
@@ -144,7 +176,6 @@ export async function registerRoutes(
         return res.status(400).json({ message: "No working days in selected range (Sundays excluded)" });
       }
 
-      // Check monthly leave quota (max 2 per month)
       const month = start.getMonth() + 1;
       const year = start.getFullYear();
       const usedDays = await storage.getMonthlyLeaveCount(currentUser.id, year, month);
@@ -152,7 +183,6 @@ export async function registerRoutes(
       const lopDays = Math.max(0, days - remaining);
       const isLop = lopDays > 0;
 
-      // Find manager: user's managerId, or first manager/admin
       let managerId = currentUser.managerId || null;
       if (!managerId) {
         const allUsers = await storage.getUsers();
@@ -215,295 +245,42 @@ export async function registerRoutes(
       res.status(500).json({ message: err?.message || "Failed to cancel leave" });
     }
   });
-  app.get('/api/users/assignable', requireAuth, async (req, res) => {
+
+  // ── Missed Follow-up Days (KPI) ─────────────────────────────────────────────
+
+  // GET /api/missed-followup-days — returns stamped missed days for the current user
+  // Admin/manager can pass ?userId=X to view another user's history
+  app.get('/api/missed-followup-days', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
-        const users = await storage.getUsers();
-        return res.status(200).json(users);
-      }
-      // For user role: find their manager and manager's team
-      const allUsers = await storage.getUsers();
-      const managerId = currentUser.managerId;
-      if (!managerId) {
-        // No manager assigned — return just themselves so they can self-assign
-        const self = allUsers.find((u: any) => u.id === currentUser.id);
-        return res.status(200).json(self ? [self] : []);
-      }
-      const manager = allUsers.find((u: any) => u.id === managerId);
-      // Everyone who reports to the same manager (siblings) + the manager themselves
-      const peers = allUsers.filter((u: any) => u.managerId === managerId || u.id === managerId);
-      return res.status(200).json(peers);
-    } catch (err: any) {
-      return res.status(500).json({ message: err?.message || String(err) });
-    }
-  });
+      let targetUserId = currentUser.id;
 
-  app.post(api.users.create.path, requireAdmin, async (req, res) => {
-    try {
-      const input = api.users.create.input.parse(req.body);
-      const existing = await storage.getUserByUsername(input.username);
-      if (existing) {
-        return res.status(400).json({ message: "Username already exists" });
-      }
-      const hashed = await hashPassword(input.password);
-      const user = await storage.createUser({ ...input, password: hashed });
-      res.status(201).json(user);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.patch(api.users.update.path, requireAdmin, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.users.update.input.parse(req.body);
-      const updates: any = {};
-      if (input.role) updates.role = input.role;
-      if (input.username) updates.username = input.username;
-      if (input.password) updates.password = await hashPassword(input.password);
-      if (input.managerId !== undefined) updates.managerId = input.managerId;
-      const user = await storage.updateUser(id, updates);
-      res.status(200).json(user);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      return res.status(404).json({ message: "User not found" });
-    }
-  });
-
-  app.delete(api.users.delete.path, requireAdmin, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      // Nullify assignedTo on any leads assigned to this user
-      const leads = await storage.getLeads({ assignedTo: id });
-      for (const lead of leads) {
-        await storage.updateLead(lead.id, { assignedTo: null });
-      }
-      // Remove managerId reference from users managed by this user
-      const allUsers = await storage.getUsers();
-      for (const u of allUsers) {
-        if (u.managerId === id) {
-          await storage.updateUser(u.id, { managerId: null });
+      if (req.query.userId) {
+        const requestedId = Number(req.query.userId);
+        if (currentUser.role === 'user' && requestedId !== currentUser.id) {
+          return res.status(403).json({ message: "Not authorized" });
         }
+        targetUserId = requestedId;
       }
-      // Nullify userId on lead_activities to avoid FK constraint violation
-      await storage.nullifyUserActivities(id);
-      await storage.deleteUser(id);
-      res.status(204).end();
+
+      const days = await storage.getMissedFollowupDays(targetUserId);
+      res.json(days);
     } catch (err: any) {
-      console.error("delete user error:", err);
-      res.status(500).json({ message: err?.message || "Failed to delete user" });
+      res.status(500).json({ message: err?.message || "Failed to fetch missed follow-up days" });
     }
   });
 
-  // Leads API
-  app.get(api.leads.list.path, requireAuth, async (req, res) => {
-    const currentUser = req.user as any;
-    // Users (non-admin, non-manager) only see their own assigned leads
-    const options = currentUser.role === 'user'
-      ? { assignedTo: currentUser.id }
-      : undefined;
-    const leads = await storage.getLeads(options);
-    res.status(200).json(leads);
-  });
-  
-  // ─── ADD THIS ROUTE HERE ───
-app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
-  try {
-    const targetId = Number(req.params.id);
-    const currentUser = req.user as any;
-
-    // Managers can only view users assigned to them
-    if (currentUser.role === 'manager') {
-      const myUsers = await storage.getUsersByManager(currentUser.id);
-      const allowed = myUsers.some((u: any) => u.id === targetId);
-      if (!allowed) {
-        return res.status(403).json({ message: "Not authorized" });
-      }
-    }
-
-    const leads = await storage.getLeads({ assignedTo: targetId });
-    res.status(200).json(leads);
-  } catch (err: any) {
-    console.error("user leads route error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
-  }
-});
-
-  // Bulk update leads
-  app.post(api.leads.bulkUpdate.path, requireAuth, async (req, res) => {
+  // POST /api/missed-followup-days/stamp — manually trigger stamp (admin only, for testing)
+  app.post('/api/missed-followup-days/stamp', requireAdmin, async (req, res) => {
     try {
-      const input = api.leads.bulkUpdate.input.parse(req.body);
-      if (input.ids.length === 0) return res.status(400).json({ message: "No leads selected" });
-
-      const currentUser = req.user as any;
-      // For each lead, if status is changing, log activity
-      if (input.updates.status) {
-        for (const id of input.ids) {
-          const existing = await storage.getLead(id);
-          if (existing && existing.status !== input.updates.status) {
-            await storage.createLeadActivity({
-              leadId: id,
-              userId: currentUser.id,
-              type: 'status_change',
-              content: `Status changed from "${existing.status}" to "${input.updates.status}" (bulk update)`,
-            });
-          }
-        }
+      const todayKey = new Date().toISOString().split("T")[0];
+      const rows = await storage.getOverdueFollowupLeads();
+      for (const { userId, count } of rows) {
+        await storage.stampMissedFollowupDay(userId, todayKey, count);
       }
-      if (input.updates.assignedTo !== undefined) {
-        for (const id of input.ids) {
-          await storage.createLeadActivity({
-            leadId: id,
-            userId: currentUser.id,
-            type: 'created',
-            content: `Lead reassigned (bulk update)`,
-          });
-        }
-      }
-
-      await storage.bulkUpdateLeads(input.ids, input.updates);
-      res.status(200).json({ count: input.ids.length });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.get(api.leads.get.path, requireAuth, async (req, res) => {
-    const lead = await storage.getLead(Number(req.params.id));
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    res.status(200).json(lead);
-  });
-
-  app.post(api.leads.create.path, requireAuth, async (req, res) => {
-    try {
-      const input = api.leads.create.input.parse(req.body);
-      const lead = await storage.createLead(input);
-      // Log creation activity
-      await storage.createLeadActivity({
-        leadId: lead.id,
-        userId: (req.user as any).id,
-        type: 'created',
-        content: 'Lead created',
-      });
-      res.status(201).json(lead);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.patch(api.leads.update.path, requireAuth, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.leads.update.input.parse(req.body);
-      const existing = await storage.getLead(id);
-      if (!existing) return res.status(404).json({ message: "Lead not found" });
-
-      const lead = await storage.updateLead(id, input);
-
-      // Log status change activity automatically
-      if (input.status && input.status !== existing.status) {
-        await storage.createLeadActivity({
-          leadId: id,
-          userId: (req.user as any).id,
-          type: 'status_change',
-          content: `Status changed from "${existing.status}" to "${input.status}"`,
-        });
-      }
-
-      res.status(200).json(lead);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      return res.status(404).json({ message: "Lead not found" });
-    }
-  });
-
-  app.delete(api.leads.delete.path, requireAuth, async (req, res) => {
-    await storage.deleteLead(Number(req.params.id));
-    res.status(204).end();
-  });
-
-  // Lead Activities API
-  app.get(api.leads.activities.list.path, requireAuth, async (req, res) => {
-    const activities = await storage.getLeadActivities(Number(req.params.id));
-    res.status(200).json(activities);
-  });
-
-  app.post(api.leads.activities.create.path, requireAuth, async (req, res) => {
-    try {
-      const id = Number(req.params.id);
-      const input = api.leads.activities.create.input.parse(req.body);
-      const activity = await storage.createLeadActivity({
-        leadId: id,
-        userId: (req.user as any).id,
-        type: input.type,
-        content: input.content,
-      });
-      res.status(201).json(activity);
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      console.error("route error:", err);
-      return res.status(500).json({ message: (err as any)?.message || String(err) });
-    }
-  });
-
-  app.post(api.leads.uploadCsv.path, requireAuth, upload.single("file"), async (req, res) => {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-    const content = fs.readFileSync(req.file.path, "utf-8");
-    const lines = content.split("\n");
-    let count = 0;
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const [name, mobile, email, company] = line.split(",").map((s: string) => s.trim());
-      if (name && mobile) {
-        const lead = await storage.createLead({ name, mobile, email, company, status: "Open" });
-        await storage.createLeadActivity({
-          leadId: lead.id,
-          userId: (req.user as any).id,
-          type: 'created',
-          content: 'Lead imported from CSV',
-        });
-        count++;
-      }
-    }
-    res.status(200).json({ count });
-  });
-
-  // Templates API
-  app.get(api.templates.list.path, requireAuth, async (req, res) => {
-    const templates = await storage.getTemplates();
-    res.status(200).json(templates);
-  });
-
-  // Upload PDF for template
-  app.post('/api/templates/upload-pdf', requireAuth, uploadPdf.single('pdf'), async (req, res) => {
-    try {
-      if (!req.file) return res.status(400).json({ message: "No PDF uploaded" });
-      const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const pdfUrl = `${baseUrl}/uploads/pdfs/${req.file.filename}`;
-      res.status(200).json({ pdfUrl, pdfName: req.file.originalname });
+      res.json({ stamped: rows.length, date: todayKey });
     } catch (err: any) {
-      return res.status(500).json({ message: err?.message || String(err) });
+      res.status(500).json({ message: err?.message || "Failed to stamp" });
     }
   });
 
@@ -551,7 +328,6 @@ app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
     try {
       const currentUser = req.user as any;
       const targetId = Number(req.params.id);
-      // Managers can only view their assigned users
       if (currentUser.role === 'manager') {
         const myUsers = await storage.getUsersByManager(currentUser.id);
         const allowed = myUsers.some(u => u.id === targetId);
@@ -569,115 +345,100 @@ app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
     }
   });
 
-// ─── ADD THESE TWO ROUTES inside registerRoutes(), after the existing /api/reports/user/:id route ───
+  app.get('/api/reports/user/:id/leads', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const targetId = Number(req.params.id);
 
-// Returns leads that a user had activity on within the period, with their recent activities
-app.get('/api/reports/user/:id/leads', requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user as any;
-    const targetId = Number(req.params.id);
-
-    // Auth check: managers can only view their assigned users
-    if (currentUser.role === 'manager') {
-      const myUsers = await storage.getUsersByManager(currentUser.id);
-      const allowed = myUsers.some((u: any) => u.id === targetId);
-      if (!allowed) return res.status(403).json({ message: "Not authorized" });
-    } else if (currentUser.role !== 'admin') {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    const { period } = req.query;
-    const { from, to } = getDateRange(period as string);
-
-    // Get all activities by this user in the period
-    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
-
-    // Group by leadId
-    const leadMap = new Map<number, any[]>();
-    for (const act of activities) {
-      if (!leadMap.has(act.leadId)) leadMap.set(act.leadId, []);
-      leadMap.get(act.leadId)!.push(act);
-    }
-
-    // Fetch each lead and attach its activities
-    const result = [];
-    for (const [leadId, acts] of leadMap) {
-      const lead = await storage.getLead(leadId);
-      if (!lead) continue;
-      result.push({
-        ...lead,
-        activityCount: acts.length,
-        recentActivities: acts
-          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          .slice(0, 3),
-      });
-    }
-
-    // Sort by most recent activity first
-    result.sort((a, b) => {
-      const aTime = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
-      const bTime = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
-      return bTime - aTime;
-    });
-
-    res.status(200).json(result);
-  } catch (err: any) {
-    console.error("user leads error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
-  }
-});
-
-// Returns individual activity records for a user filtered by type and period (for My Report drill-down)
-app.get('/api/reports/activities', requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user as any;
-    const { period, type, userId: queryUserId } = req.query;
-
-    let targetId = currentUser.id;
-
-    // If a userId is specified, check authorization
-    if (queryUserId) {
-      targetId = Number(queryUserId);
       if (currentUser.role === 'manager') {
         const myUsers = await storage.getUsersByManager(currentUser.id);
         const allowed = myUsers.some((u: any) => u.id === targetId);
         if (!allowed) return res.status(403).json({ message: "Not authorized" });
-      } else if (currentUser.role !== 'admin' && targetId !== currentUser.id) {
+      } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
+
+      const { period } = req.query;
+      const { from, to } = getDateRange(period as string);
+      const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
+
+      const leadMap = new Map<number, any[]>();
+      for (const act of activities) {
+        if (!leadMap.has(act.leadId)) leadMap.set(act.leadId, []);
+        leadMap.get(act.leadId)!.push(act);
+      }
+
+      const result = [];
+      for (const [leadId, acts] of leadMap) {
+        const lead = await storage.getLead(leadId);
+        if (!lead) continue;
+        result.push({
+          ...lead,
+          activityCount: acts.length,
+          recentActivities: acts
+            .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+            .slice(0, 3),
+        });
+      }
+
+      result.sort((a, b) => {
+        const aTime = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
+        const bTime = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      res.status(200).json(result);
+    } catch (err: any) {
+      console.error("user leads error:", err);
+      return res.status(500).json({ message: err?.message || String(err) });
     }
+  });
 
-    const { from, to } = getDateRange(period as string);
-    const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
+  app.get('/api/reports/activities', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      const { period, type, userId: queryUserId } = req.query;
 
-    // Filter by type if provided
-    const filtered = type
-      ? activities.filter((a: any) => a.type === type)
-      : activities;
+      let targetId = currentUser.id;
 
-    // Enrich with lead info
-    const enriched = await Promise.all(
-      filtered.map(async (act: any) => {
-        const lead = await storage.getLead(act.leadId);
-        return {
-          ...act,
-          leadName: lead?.name ?? 'Unknown',
-          leadCompany: lead?.company ?? null,
-          leadMobile: lead?.mobile ?? null,
-          leadStatus: lead?.status ?? null,
-        };
-      })
-    );
+      if (queryUserId) {
+        targetId = Number(queryUserId);
+        if (currentUser.role === 'manager') {
+          const myUsers = await storage.getUsersByManager(currentUser.id);
+          const allowed = myUsers.some((u: any) => u.id === targetId);
+          if (!allowed) return res.status(403).json({ message: "Not authorized" });
+        } else if (currentUser.role !== 'admin' && targetId !== currentUser.id) {
+          return res.status(403).json({ message: "Not authorized" });
+        }
+      }
 
-    // Sort newest first
-    enriched.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const { from, to } = getDateRange(period as string);
+      const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
 
-    res.status(200).json(enriched);
-  } catch (err: any) {
-    console.error("activities error:", err);
-    return res.status(500).json({ message: err?.message || String(err) });
-  }
-});
+      const filtered = type
+        ? activities.filter((a: any) => a.type === type)
+        : activities;
+
+      const enriched = await Promise.all(
+        filtered.map(async (act: any) => {
+          const lead = await storage.getLead(act.leadId);
+          return {
+            ...act,
+            leadName: lead?.name ?? 'Unknown',
+            leadCompany: lead?.company ?? null,
+            leadMobile: lead?.mobile ?? null,
+            leadStatus: lead?.status ?? null,
+          };
+        })
+      );
+
+      enriched.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.status(200).json(enriched);
+    } catch (err: any) {
+      console.error("activities error:", err);
+      return res.status(500).json({ message: err?.message || String(err) });
+    }
+  });
 
   app.get('/api/reports/my-users', requireAuth, async (req, res) => {
     try {
@@ -708,11 +469,10 @@ function getDateRange(period: string): { from: Date; to: Date } {
   from.setHours(0, 0, 0, 0);
 
   if (period === 'week') {
-    from.setDate(from.getDate() - from.getDay()); // start of week (Sunday)
+    from.setDate(from.getDate() - from.getDay());
   } else if (period === 'month') {
-    from.setDate(1); // start of month
+    from.setDate(1);
   }
-  // default: today
 
   return { from, to };
 }
