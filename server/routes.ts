@@ -69,7 +69,6 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
 
-  // Start the nightly cron job
   scheduleMissedFollowupStamp();
 
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -116,12 +115,36 @@ export async function registerRoutes(
   };
 
   // ── Users ───────────────────────────────────────────────────────────────────
-  app.get(api.users.list.path, requireAuth, async (req, res) => {
+
+  // All users — admin/manager only
+  app.get(api.users.list.path, requireAdminOrManager, async (req, res) => {
     try {
       const users = await storage.getUsers();
       res.status(200).json(users);
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to fetch users" });
+    }
+  });
+
+  // Assignable users — all roles, returns colleagues under same manager for users
+  // IMPORTANT: must be registered BEFORE /api/users/:id to avoid route conflict
+  app.get('/api/users/assignable', requireAuth, async (req, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (currentUser.role === 'admin' || currentUser.role === 'manager') {
+        // Admin/manager see all users
+        return res.status(200).json(await storage.getUsers());
+      }
+      // Regular user: return colleagues under the same manager
+      if (currentUser.managerId) {
+        const colleagues = await storage.getUsersByManager(currentUser.managerId);
+        return res.status(200).json(colleagues);
+      }
+      // No manager assigned — return just themselves so dropdown isn't empty
+      const self = await storage.getUser(currentUser.id);
+      return res.status(200).json(self ? [self] : []);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "Failed to fetch assignable users" });
     }
   });
 
@@ -169,14 +192,15 @@ export async function registerRoutes(
   });
 
   // ── Leads ───────────────────────────────────────────────────────────────────
-  // NOTE: bulk and upload routes MUST come before /:id routes to avoid conflict
+  // NOTE: specific sub-paths (bulk, upload) MUST come before /:id
+
   app.post(api.leads.bulkUpdate.path, requireAdminOrManager, async (req, res) => {
     try {
       const { ids, updates } = req.body;
       if (!Array.isArray(ids) || ids.length === 0)
         return res.status(400).json({ message: "No lead IDs provided" });
       await storage.bulkUpdateLeads(ids, updates);
-      res.status(200).json({ message: "Leads updated" });
+      res.status(200).json({ count: ids.length });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to bulk update leads" });
     }
@@ -185,7 +209,6 @@ export async function registerRoutes(
   app.post(api.leads.uploadCsv.path, requireAdminOrManager, upload.single("csv"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-      // CSV parsing handled client-side; this endpoint just acknowledges
       res.status(200).json({ count: 0 });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to upload CSV" });
@@ -195,12 +218,9 @@ export async function registerRoutes(
   app.get(api.leads.list.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      let leads;
-      if (currentUser.role === "admin" || currentUser.role === "manager") {
-        leads = await storage.getLeads();
-      } else {
-        leads = await storage.getLeads({ assignedTo: currentUser.id });
-      }
+      const leads = (currentUser.role === "admin" || currentUser.role === "manager")
+        ? await storage.getLeads()
+        : await storage.getLeads({ assignedTo: currentUser.id });
       res.status(200).json(leads);
     } catch (err: any) {
       console.error("leads list error:", err);
@@ -212,9 +232,7 @@ export async function registerRoutes(
     try {
       const currentUser = req.user as any;
       const data = { ...req.body };
-      if (currentUser.role === "user") {
-        data.assignedTo = currentUser.id;
-      }
+      if (currentUser.role === "user") data.assignedTo = currentUser.id;
       const lead = await storage.createLead(data);
       await storage.createLeadActivity({
         leadId: lead.id,
@@ -245,9 +263,23 @@ export async function registerRoutes(
       const currentUser = req.user as any;
       const id = Number(req.params.id);
       const updates = req.body;
+
       const existing = await storage.getLead(id);
       if (!existing) return res.status(404).json({ message: "Lead not found" });
+
+      // ── followUpDate fix ───────────────────────────────────────────────────
+      // The client sends an ISO string. The schema preprocessor may convert it
+      // to a Date object. We normalise it here so .toLocaleDateString() never
+      // throws "value.toISOString is not a function".
+      if (updates.followUpDate !== undefined && updates.followUpDate !== null) {
+        const raw = updates.followUpDate;
+        // Accept both Date objects and strings
+        const asDate = raw instanceof Date ? raw : new Date(String(raw));
+        updates.followUpDate = isNaN(asDate.getTime()) ? null : asDate.toISOString();
+      }
+
       const lead = await storage.updateLead(id, updates);
+
       if (updates.status && updates.status !== existing.status) {
         await storage.createLeadActivity({
           leadId: id,
@@ -256,14 +288,17 @@ export async function registerRoutes(
           content: `Status changed from ${existing.status} to ${updates.status}`,
         });
       }
+
       if (updates.followUpDate && updates.followUpDate !== existing.followUpDate) {
+        const displayDate = new Date(String(updates.followUpDate)).toLocaleDateString();
         await storage.createLeadActivity({
           leadId: id,
           userId: currentUser.id,
           type: "follow_up_set",
-          content: `Follow-up set for ${new Date(updates.followUpDate).toLocaleDateString()}`,
+          content: `Follow-up set for ${displayDate}`,
         });
       }
+
       res.status(200).json(lead);
     } catch (err: any) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -281,7 +316,7 @@ export async function registerRoutes(
     }
   });
 
-  // ── Lead Activities — path uses :id (not :leadId) per shared/routes ─────────
+  // ── Lead Activities ─────────────────────────────────────────────────────────
   app.get(api.leads.activities.list.path, requireAuth, async (req, res) => {
     try {
       const activities = await storage.getLeadActivities(Number(req.params.id));
@@ -323,10 +358,7 @@ export async function registerRoutes(
       const { name, content, pdfUrl, pdfName } = req.body;
       if (!name || !content) return res.status(400).json({ message: "Name and content are required" });
       const template = await storage.createTemplate({
-        name,
-        content,
-        pdfUrl: pdfUrl || null,
-        pdfName: pdfName || null,
+        name, content, pdfUrl: pdfUrl || null, pdfName: pdfName || null,
       });
       res.status(201).json(template);
     } catch (err: any) {
@@ -349,8 +381,7 @@ export async function registerRoutes(
   app.post('/api/upload/pdf', requireAuth, uploadPdf.single('pdf'), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-      const pdfUrl = `/uploads/pdfs/${req.file.filename}`;
-      res.status(200).json({ pdfUrl, pdfName: req.file.originalname });
+      res.status(200).json({ pdfUrl: `/uploads/pdfs/${req.file.filename}`, pdfName: req.file.originalname });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to upload PDF" });
     }
@@ -365,8 +396,7 @@ export async function registerRoutes(
   app.get('/api/reports/me', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      const { period } = req.query;
-      const { from, to } = getDateRange(period as string);
+      const { from, to } = getDateRange(req.query.period as string);
       const summary = await storage.getActivitySummary(currentUser.id, from, to);
       res.status(200).json(summary);
     } catch (err: any) {
@@ -386,8 +416,7 @@ export async function registerRoutes(
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
-      const { period } = req.query;
-      const { from, to } = getDateRange(period as string);
+      const { from, to } = getDateRange(req.query.period as string);
       const summary = await storage.getActivitySummary(targetId, from, to);
       res.status(200).json(summary);
     } catch (err: any) {
@@ -407,8 +436,7 @@ export async function registerRoutes(
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
-      const { period } = req.query;
-      const { from, to } = getDateRange(period as string);
+      const { from, to } = getDateRange(req.query.period as string);
       const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
       const leadMap = new Map<number, any[]>();
       for (const act of activities) {
@@ -428,9 +456,9 @@ export async function registerRoutes(
         });
       }
       result.sort((a, b) => {
-        const aTime = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
-        const bTime = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
-        return bTime - aTime;
+        const aT = a.recentActivities[0]?.createdAt ? new Date(a.recentActivities[0].createdAt).getTime() : 0;
+        const bT = b.recentActivities[0]?.createdAt ? new Date(b.recentActivities[0].createdAt).getTime() : 0;
+        return bT - aT;
       });
       res.status(200).json(result);
     } catch (err: any) {
@@ -477,17 +505,14 @@ export async function registerRoutes(
     }
   });
 
-  // Reports: my-users — manager sees their assigned users, admin sees all non-admin users
   app.get('/api/reports/my-users', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
       if (currentUser.role === 'manager') {
-        const myUsers = await storage.getUsersByManager(currentUser.id);
-        return res.status(200).json(myUsers);
+        return res.status(200).json(await storage.getUsersByManager(currentUser.id));
       } else if (currentUser.role === 'admin') {
-        const allUsers = await storage.getUsers();
-        // Admin sees all non-admin users
-        return res.status(200).json(allUsers.filter((u: any) => u.role !== 'admin'));
+        const all = await storage.getUsers();
+        return res.status(200).json(all.filter((u: any) => u.role !== 'admin'));
       }
       return res.status(403).json({ message: "Not authorized" });
     } catch (err: any) {
@@ -635,10 +660,7 @@ function getDateRange(period: string): { from: Date; to: Date } {
   to.setHours(0, 0, 0, 0);
   const from = new Date();
   from.setHours(0, 0, 0, 0);
-  if (period === 'week') {
-    from.setDate(from.getDate() - from.getDay());
-  } else if (period === 'month') {
-    from.setDate(1);
-  }
+  if (period === 'week') from.setDate(from.getDate() - from.getDay());
+  else if (period === 'month') from.setDate(1);
   return { from, to };
 }
