@@ -267,15 +267,20 @@ export async function registerRoutes(
       const existing = await storage.getLead(id);
       if (!existing) return res.status(404).json({ message: "Lead not found" });
 
-      // ── followUpDate fix ───────────────────────────────────────────────────
-      // The client sends an ISO string. The schema preprocessor may convert it
-      // to a Date object. We normalise it here so .toLocaleDateString() never
-      // throws "value.toISOString is not a function".
-      if (updates.followUpDate !== undefined && updates.followUpDate !== null) {
-        const raw = updates.followUpDate;
-        // Accept both Date objects and strings
-        const asDate = raw instanceof Date ? raw : new Date(String(raw));
-        updates.followUpDate = isNaN(asDate.getTime()) ? null : asDate.toISOString();
+      // ── followUpDate normalisation ─────────────────────────────────────────
+      // Client sends an ISO string. Drizzle's timestamp column needs a Date
+      // object (or null). Convert here before hitting storage so Drizzle never
+      // receives a plain string and throws "value.toISOString is not a function".
+      let followUpDateObj: Date | null | undefined = undefined;
+      if ('followUpDate' in updates) {
+        if (updates.followUpDate === null || updates.followUpDate === '' || updates.followUpDate === undefined) {
+          followUpDateObj = null;
+        } else {
+          const raw = updates.followUpDate;
+          const asDate = raw instanceof Date ? raw : new Date(String(raw));
+          followUpDateObj = isNaN(asDate.getTime()) ? null : asDate;
+        }
+        updates.followUpDate = followUpDateObj;
       }
 
       const lead = await storage.updateLead(id, updates);
@@ -289,13 +294,12 @@ export async function registerRoutes(
         });
       }
 
-      if (updates.followUpDate && updates.followUpDate !== existing.followUpDate) {
-        const displayDate = new Date(String(updates.followUpDate)).toLocaleDateString();
+      if (followUpDateObj !== undefined && followUpDateObj !== null) {
         await storage.createLeadActivity({
           leadId: id,
           userId: currentUser.id,
           type: "follow_up_set",
-          content: `Follow-up set for ${displayDate}`,
+          content: `Follow-up set for ${followUpDateObj.toLocaleDateString()}`,
         });
       }
 
