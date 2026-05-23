@@ -1,72 +1,178 @@
 import { useState, useEffect } from "react";
-import { useMyReport, useUserReport, useMyUsers, useActivityList, type ReportPeriod } from "@/hooks/use-reports";
+import { useMyReport, useUserReport, useMyUsers, useActivityList, type ReportPeriod, type DateRange } from "@/hooks/use-reports";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import {
   Phone, MessageCircle, MessageSquare, Plus, ArrowRightLeft,
-  StickyNote, CalendarClock, Activity, Loader2, TrendingUp, Users,
+  StickyNote, CalendarClock, Loader2, TrendingUp, Users,
   ChevronDown, ChevronRight, X, BarChart3, AlertTriangle,
-  CheckCircle2, UserCheck, Trophy, ArrowUp, ArrowDown, Minus
+  CheckCircle2, UserCheck, Trophy, ArrowDown, Minus, Calendar
 } from "lucide-react";
 
+// ── Period config ─────────────────────────────────────────────────────────────
 type Period = { label: string; value: ReportPeriod };
 
 const PERIODS: Period[] = [
-  { label: "Today", value: "today" },
-  { label: "This Week", value: "week" },
-  { label: "This Month", value: "month" },
+  { label: "Today",      value: "today"  },
+  { label: "This Week",  value: "week"   },
+  { label: "This Month", value: "month"  },
+  { label: "Custom",     value: "custom" },
 ];
 
 type StatKey = 'calls' | 'whatsapp' | 'sms' | 'leadsCreated' | 'statusChanges' | 'notesAdded' | 'followUpsSet';
 
 const STAT_DEFS: Array<{
-  key: StatKey;
-  label: string;
-  icon: any;
-  color: string;
-  bg: string;
-  border: string;
-  activityType: string;
+  key: StatKey; label: string; icon: any;
+  color: string; bg: string; border: string; activityType: string;
 }> = [
-  { key: 'calls', label: "Calls Made", icon: Phone, color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", activityType: 'call' },
-  { key: 'whatsapp', label: "WhatsApp Sent", icon: MessageCircle, color: "text-green-400", bg: "bg-green-400/10", border: "border-green-400/20", activityType: 'whatsapp' },
-  { key: 'sms', label: "SMS Sent", icon: MessageSquare, color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", activityType: 'sms' },
-  { key: 'leadsCreated', label: "Leads Created", icon: Plus, color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20", activityType: 'created' },
-  { key: 'statusChanges', label: "Status Changes", icon: ArrowRightLeft, color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", activityType: 'status_change' },
-  { key: 'notesAdded', label: "Notes Added", icon: StickyNote, color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20", activityType: 'note' },
-  { key: 'followUpsSet', label: "Follow-ups Set", icon: CalendarClock, color: "text-sky-400", bg: "bg-sky-400/10", border: "border-sky-400/20", activityType: 'followup' },
+  { key: 'calls',         label: "Calls Made",      icon: Phone,           color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", activityType: 'call'          },
+  { key: 'whatsapp',      label: "WhatsApp Sent",   icon: MessageCircle,   color: "text-green-400",   bg: "bg-green-400/10",   border: "border-green-400/20",   activityType: 'whatsapp'      },
+  { key: 'sms',           label: "SMS Sent",         icon: MessageSquare,   color: "text-blue-400",    bg: "bg-blue-400/10",    border: "border-blue-400/20",    activityType: 'sms'           },
+  { key: 'leadsCreated',  label: "Leads Created",    icon: Plus,            color: "text-purple-400",  bg: "bg-purple-400/10",  border: "border-purple-400/20",  activityType: 'created'       },
+  { key: 'statusChanges', label: "Status Changes",   icon: ArrowRightLeft,  color: "text-amber-400",   bg: "bg-amber-400/10",   border: "border-amber-400/20",   activityType: 'status_change' },
+  { key: 'notesAdded',    label: "Notes Added",      icon: StickyNote,      color: "text-orange-400",  bg: "bg-orange-400/10",  border: "border-orange-400/20",  activityType: 'note'          },
+  { key: 'followUpsSet',  label: "Follow-ups Set",   icon: CalendarClock,   color: "text-sky-400",     bg: "bg-sky-400/10",     border: "border-sky-400/20",     activityType: 'followup'      },
 ];
 
 // ── KPI types ─────────────────────────────────────────────────────────────────
 interface UserKPI {
-  userId: number;
-  username: string;
-  calls: number;
-  willRegister: number;   // leads with status "Will Register"
-  converted: number;      // leads with status "Converted"
-  missedFollowups: number; // stamped missed days count
-  totalActivities: number;
+  userId: number; username: string;
+  calls: number; willRegister: number; converted: number;
+  missedFollowups: number; totalActivities: number;
+}
+
+// ── Custom date range picker ──────────────────────────────────────────────────
+function DateRangePicker({ range, onChange }: {
+  range: DateRange;
+  onChange: (r: DateRange) => void;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+
+  const handleFrom = (from: string) => {
+    // if from > to, reset to
+    const to = range.to && from > range.to ? "" : range.to;
+    onChange({ from, to });
+  };
+
+  const handleTo = (to: string) => {
+    onChange({ ...range, to });
+  };
+
+  // Quick shortcuts
+  const setLast7 = () => {
+    const to = today;
+    const from = new Date(Date.now() - 6 * 86400000).toISOString().split("T")[0];
+    onChange({ from, to });
+  };
+  const setLast30 = () => {
+    const to = today;
+    const from = new Date(Date.now() - 29 * 86400000).toISOString().split("T")[0];
+    onChange({ from, to });
+  };
+  const setLastMonth = () => {
+    const d = new Date();
+    const from = new Date(d.getFullYear(), d.getMonth() - 1, 1).toISOString().split("T")[0];
+    const to = new Date(d.getFullYear(), d.getMonth(), 0).toISOString().split("T")[0];
+    onChange({ from, to });
+  };
+
+  const dayCount = range.from && range.to
+    ? Math.round((new Date(range.to).getTime() - new Date(range.from).getTime()) / 86400000) + 1
+    : 0;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-4 py-3 rounded-xl border border-primary/20 bg-primary/5">
+      <Calendar className="h-4 w-4 text-primary shrink-0" />
+
+      {/* Quick presets */}
+      <div className="flex items-center gap-1">
+        {[
+          { label: "Last 7d",    fn: setLast7    },
+          { label: "Last 30d",   fn: setLast30   },
+          { label: "Last Month", fn: setLastMonth },
+        ].map(({ label, fn }) => (
+          <button
+            key={label}
+            onClick={fn}
+            className="px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="h-4 w-px bg-white/10" />
+
+      {/* From */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">From</span>
+        <input
+          type="date"
+          max={range.to || today}
+          value={range.from}
+          onChange={e => handleFrom(e.target.value)}
+          className="text-xs bg-muted/30 border border-border/50 rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        />
+      </div>
+
+      {/* To */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">To</span>
+        <input
+          type="date"
+          min={range.from}
+          max={today}
+          value={range.to}
+          onChange={e => handleTo(e.target.value)}
+          className="text-xs bg-muted/30 border border-border/50 rounded-lg px-2 py-1.5 text-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+        />
+      </div>
+
+      {/* Day count badge */}
+      {dayCount > 0 && (
+        <span className="text-xs font-medium text-primary bg-primary/10 border border-primary/20 px-2 py-1 rounded-lg">
+          {dayCount} day{dayCount > 1 ? "s" : ""}
+        </span>
+      )}
+
+      {/* Clear */}
+      {(range.from || range.to) && (
+        <button
+          onClick={() => onChange({ from: "", to: "" })}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
-function useUserSummary(userId: number | null, period: ReportPeriod) {
+function useUserSummary(userId: number | null, period: ReportPeriod, range?: DateRange) {
   return useQuery({
-    queryKey: ["/api/reports/user", userId, period],
-    enabled: userId !== null,
+    queryKey: ["/api/reports/user", userId, period, range],
+    enabled: userId !== null && (period !== 'custom' || (!!range?.from && !!range?.to)),
     queryFn: async () => {
-      const res = await fetch(`/api/reports/user/${userId}?period=${period}`, { credentials: "include" });
+      const params = period === 'custom' && range?.from && range?.to
+        ? `from=${range.from}&to=${range.to}`
+        : `period=${period}`;
+      const res = await fetch(`/api/reports/user/${userId}?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch user report");
       return res.json();
     },
   });
 }
 
-function useUserLeads(userId: number | null, period: ReportPeriod) {
+function useUserLeadsKPI(userId: number | null, period: ReportPeriod, range?: DateRange) {
   return useQuery({
-    queryKey: ["/api/reports/user", userId, period, "leads"],
-    enabled: userId !== null,
+    queryKey: ["/api/reports/user", userId, period, range, "leads"],
+    enabled: userId !== null && (period !== 'custom' || (!!range?.from && !!range?.to)),
     queryFn: async () => {
-      const res = await fetch(`/api/reports/user/${userId}/leads?period=${period}`, { credentials: "include" });
+      const params = period === 'custom' && range?.from && range?.to
+        ? `from=${range.from}&to=${range.to}`
+        : `period=${period}`;
+      const res = await fetch(`/api/reports/user/${userId}/leads?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch user leads");
       return res.json();
     },
@@ -85,16 +191,36 @@ function useMissedFollowupDays(userId: number | null) {
   });
 }
 
+// ── Compute missed followup count for a period/range ─────────────────────────
+function missedInPeriod(missedDays: { missedDate: string }[], period: ReportPeriod, range?: DateRange): number {
+  const now = new Date();
+  let from: Date;
+  let to: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+  if (period === 'custom' && range?.from && range?.to) {
+    from = new Date(range.from);
+    to = new Date(range.to + "T23:59:59");
+  } else if (period === 'today') {
+    from = new Date(now); from.setHours(0, 0, 0, 0);
+  } else if (period === 'week') {
+    from = new Date(now); from.setDate(now.getDate() - now.getDay()); from.setHours(0, 0, 0, 0);
+  } else {
+    from = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+
+  return missedDays.filter(d => {
+    const date = new Date(d.missedDate);
+    return date >= from && date <= to;
+  }).length;
+}
+
 // ── Activity List ─────────────────────────────────────────────────────────────
-function ActivityList({ userId, activityType, period, color, label, onClose }: {
-  userId: number | null;
-  activityType: string;
-  period: ReportPeriod;
-  color: string;
-  label: string;
-  onClose: () => void;
+function ActivityList({ userId, activityType, period, range, color, label, onClose }: {
+  userId: number | null; activityType: string;
+  period: ReportPeriod; range?: DateRange;
+  color: string; label: string; onClose: () => void;
 }) {
-  const { data: activities, isLoading } = useActivityList(userId, activityType, period);
+  const { data: activities, isLoading } = useActivityList(userId, activityType, period, range);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   return (
@@ -112,9 +238,7 @@ function ActivityList({ userId, activityType, period, color, label, onClose }: {
       </div>
 
       {isLoading ? (
-        <div className="flex justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : !activities || activities.length === 0 ? (
         <div className="px-5 py-8 text-center text-sm text-muted-foreground">
           No {label.toLowerCase()} in this period
@@ -132,28 +256,19 @@ function ActivityList({ userId, activityType, period, color, label, onClose }: {
                   : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                 }
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-foreground truncate block">
-                    {item.leadName || "Unknown Lead"}
-                  </span>
-                  {item.leadCompany && (
-                    <span className="text-xs text-muted-foreground">{item.leadCompany}</span>
-                  )}
+                  <span className="text-sm font-medium text-foreground truncate block">{item.leadName || "Unknown Lead"}</span>
+                  {item.leadCompany && <span className="text-xs text-muted-foreground">{item.leadCompany}</span>}
                 </div>
                 <span className="text-xs text-muted-foreground flex-shrink-0">
                   {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </button>
-
               {expandedId === item.id && (
                 <div className="px-5 pb-4 pt-2 bg-white/[0.02] border-t border-white/5">
-                  {item.content && (
-                    <p className="text-sm text-muted-foreground">{item.content}</p>
-                  )}
+                  {item.content && <p className="text-sm text-muted-foreground">{item.content}</p>}
                   <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground/60">
                     {item.leadMobile && <span>{item.leadMobile}</span>}
-                    {item.leadStatus && (
-                      <span className="capitalize">Status: {item.leadStatus}</span>
-                    )}
+                    {item.leadStatus && <span className="capitalize">Status: {item.leadStatus}</span>}
                     <span>{new Date(item.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
@@ -168,10 +283,8 @@ function ActivityList({ userId, activityType, period, color, label, onClose }: {
 
 // ── Stat Grid ─────────────────────────────────────────────────────────────────
 function StatGrid({ summary, isLoading, onStatClick, activeStatKey }: {
-  summary: any;
-  isLoading: boolean;
-  onStatClick: (key: StatKey) => void;
-  activeStatKey: StatKey | null;
+  summary: any; isLoading: boolean;
+  onStatClick: (key: StatKey) => void; activeStatKey: StatKey | null;
 }) {
   if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-muted-foreground" /></div>;
 
@@ -197,9 +310,7 @@ function StatGrid({ summary, isLoading, onStatClick, activeStatKey }: {
               key={stat.key}
               onClick={() => onStatClick(stat.key)}
               className={`rounded-2xl border ${stat.border} ${stat.bg} p-5 flex flex-col gap-3 text-left transition-all duration-200 ${
-                isActive
-                  ? 'ring-2 ring-offset-2 ring-offset-background ' + stat.border.replace('border-', 'ring-')
-                  : 'hover:brightness-125'
+                isActive ? 'ring-2 ring-offset-2 ring-offset-background ' + stat.border.replace('border-', 'ring-') : 'hover:brightness-125'
               }`}
             >
               <div className={`h-9 w-9 rounded-xl ${stat.bg} border ${stat.border} flex items-center justify-center`}>
@@ -237,67 +348,43 @@ function StatGrid({ summary, isLoading, onStatClick, activeStatKey }: {
   );
 }
 
-// ── KPI Row — loads data for one user ────────────────────────────────────────
-function KPIUserRow({
-  user,
-  period,
-  rank,
-  maxCalls,
-  maxConverted,
-  onSelect,
-  isSelected,
+// ── KPI Row with stats update ─────────────────────────────────────────────────
+function KPIUserRowWithUpdate({
+  user, period, range, rank, maxCalls, maxConverted, onSelect, isSelected, onStatsLoaded,
 }: {
   user: { id: number; username: string };
-  period: ReportPeriod;
-  rank: number;
-  maxCalls: number;
-  maxConverted: number;
-  onSelect: () => void;
-  isSelected: boolean;
+  period: ReportPeriod; range?: DateRange;
+  rank: number; maxCalls: number; maxConverted: number;
+  onSelect: () => void; isSelected: boolean;
+  onStatsLoaded: (userId: number, calls: number, converted: number, total: number) => void;
 }) {
-  const { data: summary } = useUserSummary(user.id, period);
-  const { data: leads = [] } = useUserLeads(user.id, period);
+  const { data: summary } = useUserSummary(user.id, period, range);
+  const { data: leads = [] } = useUserLeadsKPI(user.id, period, range);
   const { data: missedDays = [] } = useMissedFollowupDays(user.id);
 
   const calls = summary?.calls ?? 0;
-  const willRegister = (leads as any[]).filter((l: any) => l.status === "Will Register").length;
   const converted = (leads as any[]).filter((l: any) => l.status === "Converted").length;
-
-  // Missed follow-up days in the selected period
-  const missedFollowups = (() => {
-    const now = new Date();
-    let from: Date;
-    if (period === "today") {
-      from = new Date(now); from.setHours(0, 0, 0, 0);
-    } else if (period === "week") {
-      from = new Date(now); from.setDate(now.getDate() - now.getDay()); from.setHours(0, 0, 0, 0);
-    } else {
-      from = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-    return (missedDays as any[]).filter((d: any) => new Date(d.missedDate) >= from).length;
-  })();
-
+  const willRegister = (leads as any[]).filter((l: any) => l.status === "Will Register").length;
   const totalActivities = summary?.total ?? 0;
-  const rankColors = ["text-yellow-400", "text-slate-300", "text-amber-600"];
-  const rankBg = ["bg-yellow-400/10 border-yellow-400/20", "bg-slate-300/10 border-slate-300/20", "bg-amber-600/10 border-amber-600/20"];
+  const missedFollowups = missedInPeriod(missedDays as any[], period, range);
+
+  useEffect(() => {
+    if (summary !== undefined) onStatsLoaded(user.id, calls, converted, totalActivities);
+  }, [calls, converted, totalActivities]);
+
+  const rankEmoji = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+  const rankBg = rank === 1 ? "bg-yellow-400/10 border-yellow-400/20 text-yellow-400"
+    : rank === 2 ? "bg-slate-300/10 border-slate-300/20 text-slate-300"
+    : rank === 3 ? "bg-amber-600/10 border-amber-600/20 text-amber-600" : "";
 
   return (
-    <tr
-      onClick={onSelect}
-      className={`border-b border-white/5 cursor-pointer transition-colors ${isSelected ? "bg-primary/5" : "hover:bg-white/[0.02]"}`}
-    >
-      {/* Rank */}
+    <tr onClick={onSelect}
+      className={`border-b border-white/5 cursor-pointer transition-colors ${isSelected ? "bg-primary/5" : "hover:bg-white/[0.02]"}`}>
       <td className="px-4 py-3.5 w-12">
-        {rank <= 3 ? (
-          <div className={`h-7 w-7 rounded-lg border flex items-center justify-center text-xs font-bold ${rankBg[rank - 1] || ""} ${rankColors[rank - 1] || ""}`}>
-            {rank === 1 ? "🥇" : rank === 2 ? "🥈" : "🥉"}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground/50 pl-1">{rank}</span>
-        )}
+        {rankEmoji
+          ? <div className={`h-7 w-7 rounded-lg border flex items-center justify-center text-xs font-bold ${rankBg}`}>{rankEmoji}</div>
+          : <span className="text-sm text-muted-foreground/50 pl-1">{rank}</span>}
       </td>
-
-      {/* Name */}
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2.5">
           <div className="h-8 w-8 rounded-full bg-primary/20 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
@@ -306,57 +393,36 @@ function KPIUserRow({
           <span className="text-sm font-medium">{user.username}</span>
         </div>
       </td>
-
-      {/* Calls */}
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-emerald-400">{calls}</span>
           <div className="flex-1 max-w-[60px] h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-400/50 rounded-full transition-all duration-500"
-              style={{ width: maxCalls > 0 ? `${(calls / maxCalls) * 100}%` : "0%" }}
-            />
+            <div className="h-full bg-emerald-400/50 rounded-full" style={{ width: maxCalls > 0 ? `${(calls / maxCalls) * 100}%` : "0%" }} />
           </div>
         </div>
       </td>
-
-      {/* Will Register */}
       <td className="px-4 py-3.5">
         <span className="inline-flex items-center gap-1 text-sm font-semibold text-blue-400">
-          <UserCheck className="h-3.5 w-3.5" />
-          {willRegister}
+          <UserCheck className="h-3.5 w-3.5" />{willRegister}
         </span>
       </td>
-
-      {/* Converted */}
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-purple-400">{converted}</span>
           <div className="flex-1 max-w-[60px] h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-purple-400/50 rounded-full transition-all duration-500"
-              style={{ width: maxConverted > 0 ? `${(converted / maxConverted) * 100}%` : "0%" }}
-            />
+            <div className="h-full bg-purple-400/50 rounded-full" style={{ width: maxConverted > 0 ? `${(converted / maxConverted) * 100}%` : "0%" }} />
           </div>
         </div>
       </td>
-
-      {/* Missed Follow-ups */}
       <td className="px-4 py-3.5">
-        {missedFollowups > 0 ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs font-semibold text-red-400">
-            <AlertTriangle className="h-3 w-3" />
-            {missedFollowups} day{missedFollowups > 1 ? "s" : ""}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-400">
-            <CheckCircle2 className="h-3 w-3" />
-            Clean
-          </span>
-        )}
+        {missedFollowups > 0
+          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs font-semibold text-red-400">
+              <AlertTriangle className="h-3 w-3" />{missedFollowups} day{missedFollowups > 1 ? "s" : ""}
+            </span>
+          : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-400">
+              <CheckCircle2 className="h-3 w-3" />Clean
+            </span>}
       </td>
-
-      {/* Total */}
       <td className="px-4 py-3.5 text-right">
         <span className="text-sm font-bold text-foreground/80">{totalActivities}</span>
       </td>
@@ -364,42 +430,86 @@ function KPIUserRow({
   );
 }
 
+// ── User Detail KPI drill-down ────────────────────────────────────────────────
+function UserDetailKPI({ userId, period, range }: { userId: number; period: ReportPeriod; range?: DateRange }) {
+  const { data: summary, isLoading } = useUserSummary(userId, period, range);
+  const { data: leads = [] } = useUserLeadsKPI(userId, period, range);
+  const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
+  const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
+
+  const willRegister = (leads as any[]).filter((l: any) => l.status === "Will Register").length;
+  const converted = (leads as any[]).filter((l: any) => l.status === "Converted").length;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Calls",            val: summary?.calls ?? 0,  color: "text-emerald-400", border: "border-emerald-400/20", bg: "bg-emerald-400/5" },
+          { label: "Will Register",    val: willRegister,          color: "text-blue-400",    border: "border-blue-400/20",    bg: "bg-blue-400/5"    },
+          { label: "Converted",        val: converted,             color: "text-purple-400",  border: "border-purple-400/20",  bg: "bg-purple-400/5"  },
+          { label: "Total Activities", val: summary?.total ?? 0,  color: "text-primary",     border: "border-primary/20",     bg: "bg-primary/5"     },
+        ].map(({ label, val, color, border, bg }) => (
+          <div key={label} className={`rounded-xl border ${border} ${bg} p-4`}>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
+            <p className={`text-2xl font-bold ${color} mt-1`}>{val}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+        {STAT_DEFS.map((stat) => (
+          <button key={stat.key}
+            onClick={() => setActiveStatKey(prev => prev === stat.key ? null : stat.key)}
+            className={`rounded-xl border ${stat.border} ${stat.bg} p-3 flex flex-col gap-1.5 text-left transition-all ${
+              activeStatKey === stat.key ? "ring-2 ring-offset-1 ring-offset-background " + stat.border.replace("border-", "ring-") : "hover:brightness-125"
+            }`}>
+            <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
+            <p className={`text-xl font-bold ${stat.color}`}>{summary?.[stat.key] ?? 0}</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
+          </button>
+        ))}
+      </div>
+
+      {activeStatKey && activeStat && (
+        <ActivityList
+          userId={userId} activityType={activeStat.activityType}
+          period={period} range={range}
+          color={activeStat.color} label={activeStat.label}
+          onClose={() => setActiveStatKey(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── KPI Analytics Tab ─────────────────────────────────────────────────────────
-function KPITab({ period }: { period: ReportPeriod }) {
+function KPITab({ period, range }: { period: ReportPeriod; range?: DateRange }) {
   const { data: myUsers, isLoading } = useMyUsers();
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<"calls" | "converted" | "total">("calls");
-
-  const teamUsers = myUsers?.filter((u: any) => u.role === "user") ?? [];
-
-  // We need summary data to sort — use a lightweight approach: sort by username initially,
-  // users can click column headers to re-sort client side after data loads
   const [userStats, setUserStats] = useState<Map<number, { calls: number; converted: number; total: number }>>(new Map());
 
+  // Reset selection when period changes
+  useEffect(() => { setSelectedUserId(null); }, [period, range]);
+
   const updateStat = (userId: number, calls: number, converted: number, total: number) => {
-    setUserStats(prev => {
-      const next = new Map(prev);
-      next.set(userId, { calls, converted, total });
-      return next;
-    });
+    setUserStats(prev => { const n = new Map(prev); n.set(userId, { calls, converted, total }); return n; });
   };
 
+  const teamUsers = myUsers?.filter((u: any) => u.role === "user") ?? [];
   const sortedUsers = [...teamUsers].sort((a, b) => {
-    const aStats = userStats.get(a.id) ?? { calls: 0, converted: 0, total: 0 };
-    const bStats = userStats.get(b.id) ?? { calls: 0, converted: 0, total: 0 };
-    return (bStats[sortKey] ?? 0) - (aStats[sortKey] ?? 0);
+    const aS = userStats.get(a.id) ?? { calls: 0, converted: 0, total: 0 };
+    const bS = userStats.get(b.id) ?? { calls: 0, converted: 0, total: 0 };
+    return (bS[sortKey] ?? 0) - (aS[sortKey] ?? 0);
   });
 
-  const maxCalls = Math.max(...Array.from(userStats.values()).map(s => s.calls), 1);
+  const maxCalls     = Math.max(...Array.from(userStats.values()).map(s => s.calls), 1);
   const maxConverted = Math.max(...Array.from(userStats.values()).map(s => s.converted), 1);
 
   const SortBtn = ({ col, label }: { col: "calls" | "converted" | "total"; label: string }) => (
-    <button
-      onClick={() => setSortKey(col)}
+    <button onClick={() => setSortKey(col)}
       className={`flex items-center gap-1 text-xs font-semibold uppercase tracking-wider transition-colors ${
-        sortKey === col ? "text-primary" : "text-muted-foreground hover:text-foreground"
-      }`}
-    >
+        sortKey === col ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
       {label}
       {sortKey === col ? <ArrowDown className="h-3 w-3" /> : <Minus className="h-3 w-3 opacity-30" />}
     </button>
@@ -414,15 +524,17 @@ function KPITab({ period }: { period: ReportPeriod }) {
     </div>
   );
 
+  const totalCalls     = Array.from(userStats.values()).reduce((s, v) => s + v.calls, 0);
+  const totalConverted = Array.from(userStats.values()).reduce((s, v) => s + v.converted, 0);
+  const totalActivities = Array.from(userStats.values()).reduce((s, v) => s + v.total, 0);
+
   return (
     <div className="space-y-5">
-      {/* Summary header cards */}
+      {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-5">
           <p className="text-xs text-muted-foreground">Total Calls</p>
-          <p className="text-3xl font-display font-bold text-emerald-400 mt-1">
-            {Array.from(userStats.values()).reduce((s, v) => s + v.calls, 0)}
-          </p>
+          <p className="text-3xl font-display font-bold text-emerald-400 mt-1">{totalCalls}</p>
         </div>
         <div className="rounded-2xl border border-blue-400/20 bg-blue-400/5 p-5">
           <p className="text-xs text-muted-foreground">Team Members</p>
@@ -430,19 +542,15 @@ function KPITab({ period }: { period: ReportPeriod }) {
         </div>
         <div className="rounded-2xl border border-purple-400/20 bg-purple-400/5 p-5">
           <p className="text-xs text-muted-foreground">Total Converted</p>
-          <p className="text-3xl font-display font-bold text-purple-400 mt-1">
-            {Array.from(userStats.values()).reduce((s, v) => s + v.converted, 0)}
-          </p>
+          <p className="text-3xl font-display font-bold text-purple-400 mt-1">{totalConverted}</p>
         </div>
         <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5">
           <p className="text-xs text-muted-foreground">Total Activities</p>
-          <p className="text-3xl font-display font-bold text-primary mt-1">
-            {Array.from(userStats.values()).reduce((s, v) => s + v.total, 0)}
-          </p>
+          <p className="text-3xl font-display font-bold text-primary mt-1">{totalActivities}</p>
         </div>
       </div>
 
-      {/* KPI Table */}
+      {/* Leaderboard table */}
       <div className="rounded-2xl border border-white/8 bg-card overflow-hidden">
         <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -464,16 +572,16 @@ function KPITab({ period }: { period: ReportPeriod }) {
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider w-12">#</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Member</th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-emerald-400" /> Calls</span>
+                  <span className="flex items-center gap-1"><Phone className="h-3 w-3 text-emerald-400" />Calls</span>
                 </th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  <span className="flex items-center gap-1"><UserCheck className="h-3 w-3 text-blue-400" /> Will Register</span>
+                  <span className="flex items-center gap-1"><UserCheck className="h-3 w-3 text-blue-400" />Will Register</span>
                 </th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  <span className="flex items-center gap-1"><Trophy className="h-3 w-3 text-purple-400" /> Converted</span>
+                  <span className="flex items-center gap-1"><Trophy className="h-3 w-3 text-purple-400" />Converted</span>
                 </th>
                 <th className="px-4 py-3 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  <span className="flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-red-400" /> Missed FU</span>
+                  <span className="flex items-center gap-1"><AlertTriangle className="h-3 w-3 text-red-400" />Missed FU</span>
                 </th>
                 <th className="px-4 py-3 text-right text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Total</th>
               </tr>
@@ -482,11 +590,8 @@ function KPITab({ period }: { period: ReportPeriod }) {
               {sortedUsers.map((user, idx) => (
                 <KPIUserRowWithUpdate
                   key={user.id}
-                  user={user}
-                  period={period}
-                  rank={idx + 1}
-                  maxCalls={maxCalls}
-                  maxConverted={maxConverted}
+                  user={user} period={period} range={range}
+                  rank={idx + 1} maxCalls={maxCalls} maxConverted={maxConverted}
                   onSelect={() => setSelectedUserId(selectedUserId === user.id ? null : user.id)}
                   isSelected={selectedUserId === user.id}
                   onStatsLoaded={updateStat}
@@ -518,7 +623,7 @@ function KPITab({ period }: { period: ReportPeriod }) {
               </button>
             </div>
             <div className="p-5">
-              <UserDetailKPI userId={selectedUserId} period={period} />
+              <UserDetailKPI userId={selectedUserId} period={period} range={range} />
             </div>
           </div>
         ) : null;
@@ -527,208 +632,23 @@ function KPITab({ period }: { period: ReportPeriod }) {
   );
 }
 
-// Wrapper that also reports stats upward for sorting
-function KPIUserRowWithUpdate({
-  user, period, rank, maxCalls, maxConverted, onSelect, isSelected, onStatsLoaded,
-}: {
-  user: { id: number; username: string };
-  period: ReportPeriod;
-  rank: number;
-  maxCalls: number;
-  maxConverted: number;
-  onSelect: () => void;
-  isSelected: boolean;
-  onStatsLoaded: (userId: number, calls: number, converted: number, total: number) => void;
-}) {
-  const { data: summary } = useUserSummary(user.id, period);
-  const { data: leads = [] } = useUserLeads(user.id, period);
-  const { data: missedDays = [] } = useMissedFollowupDays(user.id);
-
-  const calls = summary?.calls ?? 0;
-  const converted = (leads as any[]).filter((l: any) => l.status === "Converted").length;
-  const willRegister = (leads as any[]).filter((l: any) => l.status === "Will Register").length;
-  const totalActivities = summary?.total ?? 0;
-
-  const missedFollowups = (() => {
-    const now = new Date();
-    let from: Date;
-    if (period === "today") { from = new Date(now); from.setHours(0, 0, 0, 0); }
-    else if (period === "week") { from = new Date(now); from.setDate(now.getDate() - now.getDay()); from.setHours(0, 0, 0, 0); }
-    else { from = new Date(now.getFullYear(), now.getMonth(), 1); }
-    return (missedDays as any[]).filter((d: any) => new Date(d.missedDate) >= from).length;
-  })();
-
-  // Report stats upward when they load
-  useEffect(() => {
-    if (summary !== undefined) {
-      onStatsLoaded(user.id, calls, converted, totalActivities);
-    }
-  }, [calls, converted, totalActivities]);
-
-  const rankEmoji = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
-  const rankBg = rank === 1 ? "bg-yellow-400/10 border-yellow-400/20 text-yellow-400"
-    : rank === 2 ? "bg-slate-300/10 border-slate-300/20 text-slate-300"
-    : rank === 3 ? "bg-amber-600/10 border-amber-600/20 text-amber-600" : "";
-
-  return (
-    <tr
-      onClick={onSelect}
-      className={`border-b border-white/5 cursor-pointer transition-colors ${isSelected ? "bg-primary/5" : "hover:bg-white/[0.02]"}`}
-    >
-      <td className="px-4 py-3.5 w-12">
-        {rankEmoji ? (
-          <div className={`h-7 w-7 rounded-lg border flex items-center justify-center text-xs font-bold ${rankBg}`}>
-            {rankEmoji}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground/50 pl-1">{rank}</span>
-        )}
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-full bg-primary/20 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-            {user.username.substring(0, 2).toUpperCase()}
-          </div>
-          <span className="text-sm font-medium">{user.username}</span>
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-emerald-400">{calls}</span>
-          <div className="flex-1 max-w-[60px] h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full bg-emerald-400/50 rounded-full transition-all duration-500"
-              style={{ width: maxCalls > 0 ? `${(calls / maxCalls) * 100}%` : "0%" }} />
-          </div>
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <span className="inline-flex items-center gap-1 text-sm font-semibold text-blue-400">
-          <UserCheck className="h-3.5 w-3.5" />{willRegister}
-        </span>
-      </td>
-
-      <td className="px-4 py-3.5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-purple-400">{converted}</span>
-          <div className="flex-1 max-w-[60px] h-1.5 bg-white/5 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-400/50 rounded-full transition-all duration-500"
-              style={{ width: maxConverted > 0 ? `${(converted / maxConverted) * 100}%` : "0%" }} />
-          </div>
-        </div>
-      </td>
-
-      <td className="px-4 py-3.5">
-        {missedFollowups > 0 ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs font-semibold text-red-400">
-            <AlertTriangle className="h-3 w-3" />{missedFollowups} day{missedFollowups > 1 ? "s" : ""}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs font-semibold text-emerald-400">
-            <CheckCircle2 className="h-3 w-3" />Clean
-          </span>
-        )}
-      </td>
-
-      <td className="px-4 py-3.5 text-right">
-        <span className="text-sm font-bold text-foreground/80">{totalActivities}</span>
-      </td>
-    </tr>
-  );
-}
-
-// ── Drill-down detail for a selected user ────────────────────────────────────
-function UserDetailKPI({ userId, period }: { userId: number; period: ReportPeriod }) {
-  const { data: summary, isLoading } = useUserSummary(userId, period);
-  const { data: leads = [] } = useUserLeads(userId, period);
-  const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
-  const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
-
-  const willRegister = (leads as any[]).filter((l: any) => l.status === "Will Register").length;
-  const converted = (leads as any[]).filter((l: any) => l.status === "Converted").length;
-
-  return (
-    <div className="space-y-4">
-      {/* Mini KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Calls</p>
-          <p className="text-2xl font-bold text-emerald-400 mt-1">{summary?.calls ?? 0}</p>
-        </div>
-        <div className="rounded-xl border border-blue-400/20 bg-blue-400/5 p-4">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Will Register</p>
-          <p className="text-2xl font-bold text-blue-400 mt-1">{willRegister}</p>
-        </div>
-        <div className="rounded-xl border border-purple-400/20 bg-purple-400/5 p-4">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Converted</p>
-          <p className="text-2xl font-bold text-purple-400 mt-1">{converted}</p>
-        </div>
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Activities</p>
-          <p className="text-2xl font-bold text-primary mt-1">{summary?.total ?? 0}</p>
-        </div>
-      </div>
-
-      {/* Clickable activity stats */}
-      <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
-        {STAT_DEFS.map((stat) => (
-          <button
-            key={stat.key}
-            onClick={() => setActiveStatKey(prev => prev === stat.key ? null : stat.key)}
-            className={`rounded-xl border ${stat.border} ${stat.bg} p-3 flex flex-col gap-1.5 text-left transition-all ${
-              activeStatKey === stat.key ? "ring-2 ring-offset-1 ring-offset-background " + stat.border.replace("border-", "ring-") : "hover:brightness-125"
-            }`}
-          >
-            <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
-            <p className={`text-xl font-bold ${stat.color}`}>{summary?.[stat.key] ?? 0}</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
-          </button>
-        ))}
-      </div>
-
-      {activeStatKey && activeStat && (
-        <ActivityList
-          userId={userId}
-          activityType={activeStat.activityType}
-          period={period}
-          color={activeStat.color}
-          label={activeStat.label}
-          onClose={() => setActiveStatKey(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 // ── My Report Tab ─────────────────────────────────────────────────────────────
-function MyReportTab({ period }: { period: ReportPeriod }) {
-  const { data: summary, isLoading } = useMyReport(period);
+function MyReportTab({ period, range }: { period: ReportPeriod; range?: DateRange }) {
+  const { data: summary, isLoading } = useMyReport(period, range);
   const { user } = useAuth();
   const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
-
-  const handleStatClick = (key: StatKey) => {
-    setActiveStatKey(prev => prev === key ? null : key);
-  };
-
   const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
 
   return (
     <div className="space-y-5">
-      <StatGrid
-        summary={summary}
-        isLoading={isLoading}
-        onStatClick={handleStatClick}
-        activeStatKey={activeStatKey}
-      />
+      <StatGrid summary={summary} isLoading={isLoading}
+        onStatClick={key => setActiveStatKey(prev => prev === key ? null : key)}
+        activeStatKey={activeStatKey} />
       {activeStatKey && activeStat && (
         <ActivityList
-          userId={user?.id ?? null}
-          activityType={activeStat.activityType}
-          period={period}
-          color={activeStat.color}
-          label={activeStat.label}
+          userId={user?.id ?? null} activityType={activeStat.activityType}
+          period={period} range={range}
+          color={activeStat.color} label={activeStat.label}
           onClose={() => setActiveStatKey(null)}
         />
       )}
@@ -737,16 +657,11 @@ function MyReportTab({ period }: { period: ReportPeriod }) {
 }
 
 // ── Team Activity Tab ─────────────────────────────────────────────────────────
-function UserReportTab({ period }: { period: ReportPeriod }) {
+function UserReportTab({ period, range }: { period: ReportPeriod; range?: DateRange }) {
   const { data: myUsers, isLoading: usersLoading } = useMyUsers();
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [activeStatKey, setActiveStatKey] = useState<StatKey | null>(null);
-  const { data: summary, isLoading: reportLoading } = useUserReport(selectedUserId, period);
-
-  const handleStatClick = (key: StatKey) => {
-    setActiveStatKey(prev => prev === key ? null : key);
-  };
-
+  const { data: summary, isLoading: reportLoading } = useUserReport(selectedUserId, period, range);
   const activeStat = STAT_DEFS.find(s => s.key === activeStatKey);
 
   if (usersLoading) return <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-muted-foreground" /></div>;
@@ -762,18 +677,13 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
         ) : (
           <div className="flex flex-wrap gap-2">
             {teamUsers.map((u: any) => (
-              <button
-                key={u.id}
-                onClick={() => {
-                  setSelectedUserId(u.id === selectedUserId ? null : u.id);
-                  setActiveStatKey(null);
-                }}
+              <button key={u.id}
+                onClick={() => { setSelectedUserId(u.id === selectedUserId ? null : u.id); setActiveStatKey(null); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all duration-200 ${
                   selectedUserId === u.id
                     ? 'bg-primary/10 border-primary/30 text-primary'
                     : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20'
-                }`}
-              >
+                }`}>
                 <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">
                   {u.username.substring(0, 1).toUpperCase()}
                 </div>
@@ -786,19 +696,14 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
 
       {selectedUserId ? (
         <>
-          <StatGrid
-            summary={summary}
-            isLoading={reportLoading}
-            onStatClick={handleStatClick}
-            activeStatKey={activeStatKey}
-          />
+          <StatGrid summary={summary} isLoading={reportLoading}
+            onStatClick={key => setActiveStatKey(prev => prev === key ? null : key)}
+            activeStatKey={activeStatKey} />
           {activeStatKey && activeStat && (
             <ActivityList
-              userId={selectedUserId}
-              activityType={activeStat.activityType}
-              period={period}
-              color={activeStat.color}
-              label={activeStat.label}
+              userId={selectedUserId} activityType={activeStat.activityType}
+              period={period} range={range}
+              color={activeStat.color} label={activeStat.label}
               onClose={() => setActiveStatKey(null)}
             />
           )}
@@ -817,9 +722,17 @@ function UserReportTab({ period }: { period: ReportPeriod }) {
 export default function Report() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<ReportPeriod>("today");
+  const [customRange, setCustomRange] = useState<DateRange>({ from: "", to: "" });
   const [activeTab, setActiveTab] = useState<'me' | 'team' | 'kpi'>('me');
 
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
+
+  // Effective range passed to hooks — only when custom + both dates set
+  const effectiveRange = period === 'custom' && customRange.from && customRange.to
+    ? customRange : undefined;
+
+  // Custom period is "ready" only when both dates are filled
+  const customReady = period !== 'custom' || (!!customRange.from && !!customRange.to);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -835,64 +748,62 @@ export default function Report() {
         {/* Period filter */}
         <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
           {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+            <button key={p.value} onClick={() => setPeriod(p.value)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 period === p.value
                   ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
                   : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
-              }`}
-            >
+              }`}>
+              {p.value === 'custom' && <Calendar className="h-3.5 w-3.5" />}
               {p.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Tab switcher */}
-      {isManagerOrAdmin && (
-        <div className="flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
-          <button
-            onClick={() => setActiveTab('me')}
-            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-              activeTab === 'me'
-                ? 'bg-card border border-white/10 text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            My Activity
-          </button>
-          <button
-            onClick={() => setActiveTab('team')}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-              activeTab === 'team'
-                ? 'bg-card border border-white/10 text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Users className="h-4 w-4" /> Team Activity
-          </button>
-          <button
-            onClick={() => setActiveTab('kpi')}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-              activeTab === 'kpi'
-                ? 'bg-card border border-white/10 text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <BarChart3 className="h-4 w-4" /> KPI Analytics
-          </button>
+      {/* Custom date range picker — shown only when Custom is active */}
+      {period === 'custom' && (
+        <DateRangePicker range={customRange} onChange={setCustomRange} />
+      )}
+
+      {/* Waiting indicator for custom with incomplete dates */}
+      {period === 'custom' && (!customRange.from || !customRange.to) && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground px-1">
+          <Calendar className="h-4 w-4" />
+          Select both a start and end date to load the report.
         </div>
       )}
 
-      {/* Content */}
-      {activeTab === 'kpi' && isManagerOrAdmin ? (
-        <KPITab period={period} />
-      ) : activeTab === 'team' && isManagerOrAdmin ? (
-        <UserReportTab period={period} />
-      ) : (
-        <MyReportTab period={period} />
+      {/* Tab switcher — manager/admin only */}
+      {isManagerOrAdmin && (
+        <div className="flex gap-1 bg-white/5 border border-white/10 rounded-xl p-1 w-fit">
+          {[
+            { key: 'me',   label: "My Activity",    icon: null       },
+            { key: 'team', label: "Team Activity",   icon: Users      },
+            { key: 'kpi',  label: "KPI Analytics",   icon: BarChart3  },
+          ].map(({ key, label, icon: Icon }) => (
+            <button key={key} onClick={() => setActiveTab(key as any)}
+              className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                activeTab === key
+                  ? 'bg-card border border-white/10 text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}>
+              {Icon && <Icon className="h-4 w-4" />}
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Content — only render when custom is ready */}
+      {customReady && (
+        activeTab === 'kpi' && isManagerOrAdmin ? (
+          <KPITab period={period} range={effectiveRange} />
+        ) : activeTab === 'team' && isManagerOrAdmin ? (
+          <UserReportTab period={period} range={effectiveRange} />
+        ) : (
+          <MyReportTab period={period} range={effectiveRange} />
+        )
       )}
     </div>
   );
