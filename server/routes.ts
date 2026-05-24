@@ -68,7 +68,6 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   await setupAuth(app);
-
   scheduleMissedFollowupStamp();
 
   // ── Auth ────────────────────────────────────────────────────────────────────
@@ -126,21 +125,18 @@ export async function registerRoutes(
     }
   });
 
-  // Assignable users — all roles, returns colleagues under same manager for users
-  // IMPORTANT: must be registered BEFORE /api/users/:id to avoid route conflict
+  // Assignable users — all roles, returns colleagues under same manager for regular users
+  // IMPORTANT: registered before /api/users/:id to avoid route conflict
   app.get('/api/users/assignable', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
       if (currentUser.role === 'admin' || currentUser.role === 'manager') {
-        // Admin/manager see all users
         return res.status(200).json(await storage.getUsers());
       }
-      // Regular user: return colleagues under the same manager
       if (currentUser.managerId) {
         const colleagues = await storage.getUsersByManager(currentUser.managerId);
         return res.status(200).json(colleagues);
       }
-      // No manager assigned — return just themselves so dropdown isn't empty
       const self = await storage.getUser(currentUser.id);
       return res.status(200).json(self ? [self] : []);
     } catch (err: any) {
@@ -156,10 +152,7 @@ export async function registerRoutes(
       if (existing) return res.status(400).json({ message: "Username already exists" });
       const hashed = await hashPassword(password);
       const user = await storage.createUser({
-        username,
-        password: hashed,
-        role: role || "user",
-        managerId: managerId || null,
+        username, password: hashed, role: role || "user", managerId: managerId || null,
       });
       res.status(201).json(user);
     } catch (err: any) {
@@ -192,8 +185,9 @@ export async function registerRoutes(
   });
 
   // ── Leads ───────────────────────────────────────────────────────────────────
-  // NOTE: specific sub-paths (bulk, upload) MUST come before /:id
+  // ORDERING MATTERS: specific sub-paths must come before /:id wildcards
 
+  // 1. Bulk update
   app.post(api.leads.bulkUpdate.path, requireAdminOrManager, async (req, res) => {
     try {
       const { ids, updates } = req.body;
@@ -206,6 +200,7 @@ export async function registerRoutes(
     }
   });
 
+  // 2. CSV upload
   app.post(api.leads.uploadCsv.path, requireAdminOrManager, upload.single("csv"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -215,6 +210,20 @@ export async function registerRoutes(
     }
   });
 
+  // 3. Leads by user — for dashboard team activity view
+  //    MUST be before GET /api/leads/:id to prevent "user" matching as an id
+  app.get('/api/leads/user/:id', requireAdminOrManager, async (req, res) => {
+    try {
+      const userId = Number(req.params.id);
+      const leads = await storage.getLeads({ assignedTo: userId });
+      res.status(200).json(leads);
+    } catch (err: any) {
+      console.error("user leads error:", err);
+      res.status(500).json({ message: err?.message || "Failed to fetch leads" });
+    }
+  });
+
+  // 4. List all leads
   app.get(api.leads.list.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
@@ -228,6 +237,7 @@ export async function registerRoutes(
     }
   });
 
+  // 5. Create lead
   app.post(api.leads.create.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
@@ -248,6 +258,7 @@ export async function registerRoutes(
     }
   });
 
+  // 6. Get single lead
   app.get(api.leads.get.path, requireAuth, async (req, res) => {
     try {
       const lead = await storage.getLead(Number(req.params.id));
@@ -258,6 +269,7 @@ export async function registerRoutes(
     }
   });
 
+  // 7. Update lead
   app.patch(api.leads.update.path, requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
@@ -267,13 +279,10 @@ export async function registerRoutes(
       const existing = await storage.getLead(id);
       if (!existing) return res.status(404).json({ message: "Lead not found" });
 
-      // ── followUpDate normalisation ─────────────────────────────────────────
-      // Client sends an ISO string. Drizzle's timestamp column needs a Date
-      // object (or null). Convert here before hitting storage so Drizzle never
-      // receives a plain string and throws "value.toISOString is not a function".
+      // Normalise followUpDate — Drizzle timestamp column needs a Date object or null
       let followUpDateObj: Date | null | undefined = undefined;
       if ('followUpDate' in updates) {
-        if (updates.followUpDate === null || updates.followUpDate === '' || updates.followUpDate === undefined) {
+        if (!updates.followUpDate) {
           followUpDateObj = null;
         } else {
           const raw = updates.followUpDate;
@@ -311,6 +320,7 @@ export async function registerRoutes(
     }
   });
 
+  // 8. Delete lead
   app.delete(api.leads.delete.path, requireAdminOrManager, async (req, res) => {
     try {
       await storage.deleteLead(Number(req.params.id));
@@ -400,7 +410,11 @@ export async function registerRoutes(
   app.get('/api/reports/me', requireAuth, async (req, res) => {
     try {
       const currentUser = req.user as any;
-      const { from, to } = getDateRange(req.query.period as string);
+      const { from, to } = getDateRange(
+        req.query.period as string,
+        req.query.from as string,
+        req.query.to as string,
+      );
       const summary = await storage.getActivitySummary(currentUser.id, from, to);
       res.status(200).json(summary);
     } catch (err: any) {
@@ -420,7 +434,11 @@ export async function registerRoutes(
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
-      const { from, to } = getDateRange(req.query.period as string);
+      const { from, to } = getDateRange(
+        req.query.period as string,
+        req.query.from as string,
+        req.query.to as string,
+      );
       const summary = await storage.getActivitySummary(targetId, from, to);
       res.status(200).json(summary);
     } catch (err: any) {
@@ -440,7 +458,11 @@ export async function registerRoutes(
       } else if (currentUser.role !== 'admin') {
         return res.status(403).json({ message: "Not authorized" });
       }
-      const { from, to } = getDateRange(req.query.period as string);
+      const { from, to } = getDateRange(
+        req.query.period as string,
+        req.query.from as string,
+        req.query.to as string,
+      );
       const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
       const leadMap = new Map<number, any[]>();
       for (const act of activities) {
@@ -486,7 +508,11 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Not authorized" });
         }
       }
-      const { from, to } = getDateRange(period as string);
+      const { from, to } = getDateRange(
+        period as string,
+        req.query.from as string,
+        req.query.to as string,
+      );
       const activities = await storage.getActivitiesByUserInRange(targetId, from, to);
       const filtered = type ? activities.filter((a: any) => a.type === type) : activities;
       const enriched = await Promise.all(
@@ -657,7 +683,16 @@ export async function registerRoutes(
   return httpServer;
 }
 
-function getDateRange(period: string): { from: Date; to: Date } {
+// ── Date range helper ─────────────────────────────────────────────────────────
+function getDateRange(period: string, fromParam?: string, toParam?: string): { from: Date; to: Date } {
+  // Custom range — explicit from/to take priority over period
+  if (fromParam && toParam) {
+    return {
+      from: new Date(fromParam + "T00:00:00"),
+      to:   new Date(toParam   + "T23:59:59"),
+    };
+  }
+
   const now = new Date();
   const to = new Date(now);
   to.setDate(to.getDate() + 1);
