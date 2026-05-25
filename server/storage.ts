@@ -327,6 +327,36 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(missedFollowupDays.missedDate));
   }
 
+// ── Add this method to IStorage interface ────────────────────────────────────
+// getActivityDays(userId: number, from: Date, to: Date): Promise<string[]>;
+// Returns array of "YYYY-MM-DD" strings where the user had at least 1 activity
+
+// ── Add this implementation to DatabaseStorage ────────────────────────────────
+async getActivityDays(userId: number, from: Date, to: Date): Promise<string[]> {
+  const rows = await db
+    .select({ createdAt: leadActivities.createdAt })
+    .from(leadActivities)
+    .where(
+      and(
+        eq(leadActivities.userId, userId),
+        gte(leadActivities.createdAt, from),
+        lt(leadActivities.createdAt, to)
+      )
+    );
+
+  // Deduplicate to unique date strings
+  const days = new Set<string>();
+  for (const row of rows) {
+    if (row.createdAt) {
+      const d = new Date(row.createdAt);
+      days.add(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+      );
+    }
+  }
+  return Array.from(days);
+}
+
   // Returns overdue follow-up counts per user — used by cron at end of day
   async getOverdueFollowupLeads(): Promise<{ userId: number; count: number }[]> {
     const now = new Date();

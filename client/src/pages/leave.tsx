@@ -35,7 +35,7 @@ interface LeaveRequest {
 interface MissedFollowupDay {
   id: number;
   userId: number;
-  missedDate: string;  // "YYYY-MM-DD"
+  missedDate: string;
   leadCount: number;
 }
 
@@ -58,7 +58,6 @@ function useLeaves() {
   });
 }
 
-// Fetches permanently stamped missed days for the current user
 function useMissedFollowupDays() {
   return useQuery<MissedFollowupDay[]>({
     queryKey: ["/api/missed-followup-days"],
@@ -70,7 +69,6 @@ function useMissedFollowupDays() {
   });
 }
 
-// Fetches stamped missed days for a specific user (manager/admin view)
 function useMissedFollowupDaysByUser(userId: number | null) {
   return useQuery<MissedFollowupDay[]>({
     queryKey: ["/api/missed-followup-days", userId],
@@ -83,7 +81,22 @@ function useMissedFollowupDaysByUser(userId: number | null) {
   });
 }
 
-// Live leads — only used for the "overdue today" warning banner count
+// Returns days in a month where the user had at least 1 activity
+function useActivityDays(userId: number | null, year: number, month: number) {
+  return useQuery<string[]>({
+    queryKey: ["/api/activity-days", userId, year, month],
+    enabled: userId !== null,
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/activity-days?userId=${userId}&year=${year}&month=${month}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) throw new Error("Failed to fetch activity days");
+      return res.json();
+    },
+  });
+}
+
 function useMyLeads() {
   return useQuery<Lead[]>({
     queryKey: ["/api/leads/my"],
@@ -202,7 +215,6 @@ function StatusBadge({ status, isLop }: { status: string; isLop: boolean }) {
 }
 
 // ── Mini Calendar (user view) ─────────────────────────────────────────────────
-// Red days come from permanently stamped DB records — clearing leads won't remove them
 function LeaveCalendar({
   leaves,
   missedDays,
@@ -218,7 +230,11 @@ function LeaveCalendar({
 
   const monthName = new Date(calYear, calMonth, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
 
-  // Pink: leave days (approved or pending) for current user
+  // Fetch days where user had activity this month
+  const { data: activeDays = [] } = useActivityDays(userId, calYear, calMonth + 1);
+  const activeDaySet = useMemo(() => new Set(activeDays), [activeDays]);
+
+  // Pink: approved/pending leave days
   const leaveDays = useMemo(() => {
     const set = new Set<string>();
     for (const l of leaves) {
@@ -235,18 +251,18 @@ function LeaveCalendar({
     return set;
   }, [leaves, userId]);
 
-  // Red: permanently stamped missed KPI days — never cleared, even if leads are resolved later
+  // Red: permanently stamped missed KPI days
   const redDays = useMemo(() => {
-    const map = new Map<string, number>(); // dateKey -> leadCount
+    const map = new Map<string, number>();
     for (const d of missedDays) {
       map.set(d.missedDate.substring(0, 10), d.leadCount);
     }
     return map;
   }, [missedDays]);
 
-  // Build calendar grid
-  const firstDay = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayKey = toDateKey(today);
 
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
@@ -261,8 +277,6 @@ function LeaveCalendar({
     if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
     else setCalMonth(m => m + 1);
   };
-
-  const todayKey = toDateKey(today);
 
   return (
     <Card className="border-border/50 shadow-sm">
@@ -280,30 +294,40 @@ function LeaveCalendar({
         </div>
       </CardHeader>
       <CardContent className="p-4">
-        {/* Day headers */}
         <div className="grid grid-cols-7 mb-2">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => (
             <div key={d} className="text-center text-[10px] font-semibold text-muted-foreground py-1">{d}</div>
           ))}
         </div>
-        {/* Day cells */}
         <div className="grid grid-cols-7 gap-y-1">
           {cells.map((day, i) => {
             if (!day) return <div key={`empty-${i}`} />;
             const key = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-            const isLeave = leaveDays.has(key);
+            const dayDate = new Date(calYear, calMonth, day);
+            const isSunday = dayDate.getDay() === 0;
+            const isPast = key < todayKey;
+            const isToday = key === todayKey;
+
+            const isExplicitLeave = leaveDays.has(key);
             const missedCount = redDays.get(key);
             const isRed = !!missedCount;
-            const isToday = key === todayKey;
-            const isSunday = new Date(calYear, calMonth, day).getDay() === 0;
+
+            // Zero-activity leave: past working day (Mon–Sat) with no activity recorded
+            // and not already marked as explicit leave
+            const isZeroActivityLeave = isPast && !isSunday && !isExplicitLeave && !activeDaySet.has(key);
+
+            // Combined pink: explicit leave OR zero-activity working day
+            const isPink = isExplicitLeave || isZeroActivityLeave;
 
             let cellClass = "relative flex items-center justify-center h-8 w-full rounded-lg text-xs font-medium transition-colors ";
 
-            if (isLeave && isRed) {
-              // On leave AND missed KPI — pink cell with red dot
+            if (isPink && isRed) {
               cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30";
-            } else if (isLeave) {
-              cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30";
+            } else if (isPink) {
+              // Slightly different shade for implicit (zero-activity) vs explicit leave
+              cellClass += isExplicitLeave
+                ? "bg-pink-500/20 text-pink-400 border border-pink-500/30"
+                : "bg-pink-500/10 text-pink-300 border border-pink-500/20";
             } else if (isRed) {
               cellClass += "bg-red-500/20 text-red-400 border border-red-500/30";
             } else if (isToday) {
@@ -314,18 +338,24 @@ function LeaveCalendar({
               cellClass += "text-foreground/70 hover:bg-muted/20";
             }
 
+            const titleText = isZeroActivityLeave && !isExplicitLeave
+              ? "No activity recorded (counted as leave)"
+              : isRed
+              ? `${missedCount} overdue lead${missedCount! > 1 ? "s" : ""} not cleared (KPI)`
+              : undefined;
+
             return (
-              <div
-                key={key}
-                className={cellClass}
-                title={isRed ? `${missedCount} overdue lead${missedCount! > 1 ? "s" : ""} not cleared (KPI)` : undefined}
-              >
+              <div key={key} className={cellClass} title={titleText}>
                 {day}
-                {/* Red dot in corner when both leave + missed KPI */}
-                {isLeave && isRed && (
+                {/* Red dot when both leave/zero-activity AND missed KPI */}
+                {isPink && isRed && (
                   <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-red-400" />
                 )}
-                {isToday && !isLeave && !isRed && (
+                {/* Small dot to distinguish implicit vs explicit leave */}
+                {isZeroActivityLeave && !isExplicitLeave && !isRed && (
+                  <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-pink-400/60" />
+                )}
+                {isToday && !isPink && !isRed && (
                   <span className="absolute bottom-1 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-primary" />
                 )}
               </div>
@@ -334,10 +364,14 @@ function LeaveCalendar({
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border/30">
+        <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-border/30">
           <div className="flex items-center gap-1.5">
             <div className="h-3 w-3 rounded-sm bg-pink-500/30 border border-pink-500/40" />
-            <span className="text-[10px] text-muted-foreground">Leave</span>
+            <span className="text-[10px] text-muted-foreground">Leave applied</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-pink-500/15 border border-pink-500/25" />
+            <span className="text-[10px] text-muted-foreground">No activity (auto leave)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="h-3 w-3 rounded-sm bg-red-500/30 border border-red-500/40" />
@@ -354,7 +388,6 @@ function LeaveCalendar({
 }
 
 // ── Team Calendar (manager/admin view) ───────────────────────────────────────
-// Red days use stamped DB records per selected member — permanent KPI history
 function TeamCalendar({
   leaves,
   members,
@@ -369,21 +402,27 @@ function TeamCalendar({
 
   const monthName = new Date(calYear, calMonth, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
 
-  // Fetch stamped missed days for the selected member (skip when "all")
   const { data: memberMissedDays = [] } = useMissedFollowupDaysByUser(
     selectedMember !== "all" ? selectedMember : null
   );
 
+  // Fetch activity days for selected member
+  const { data: memberActiveDays = [] } = useActivityDays(
+    selectedMember !== "all" ? selectedMember : null,
+    calYear,
+    calMonth + 1
+  );
+  const memberActiveDaySet = useMemo(() => new Set(memberActiveDays), [memberActiveDays]);
+
   const firstDay = new Date(calYear, calMonth, 1).getDay();
   const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayKey = toDateKey(today);
+
   const cells: (number | null)[] = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const todayKey = toDateKey(today);
-
-  // Map: dateKey -> list of usernames on leave
   const leaveDayMap = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const l of leaves) {
@@ -402,10 +441,9 @@ function TeamCalendar({
     return map;
   }, [leaves, selectedMember]);
 
-  // Map: dateKey -> leadCount (from permanently stamped DB records)
   const redDayMap = useMemo(() => {
     const map = new Map<string, number>();
-    if (selectedMember === "all") return map; // "all" view: skip red (too many to show clearly)
+    if (selectedMember === "all") return map;
     for (const d of memberMissedDays) {
       map.set(d.missedDate.substring(0, 10), d.leadCount);
     }
@@ -444,16 +482,26 @@ function TeamCalendar({
           {cells.map((day, i) => {
             if (!day) return <div key={`empty-${i}`} />;
             const key = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            const dayDate = new Date(calYear, calMonth, day);
+            const isSunday = dayDate.getDay() === 0;
+            const isPast = key < todayKey;
+            const isToday = key === todayKey;
+
             const names = leaveDayMap.get(key) || [];
             const missedCount = redDayMap.get(key);
-            const isLeave = names.length > 0;
             const isRed = !!missedCount;
-            const isToday = key === todayKey;
-            const isSunday = new Date(calYear, calMonth, day).getDay() === 0;
+            const isExplicitLeave = names.length > 0;
+
+            // Zero-activity leave for selected member only
+            const isZeroActivityLeave = selectedMember !== "all"
+              && isPast && !isSunday && !isExplicitLeave && !memberActiveDaySet.has(key);
+
+            const isPink = isExplicitLeave || isZeroActivityLeave;
 
             let cellClass = "relative group flex flex-col items-center justify-start h-10 w-full rounded-lg text-xs font-medium transition-colors pt-1 ";
-            if (isLeave && isRed) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
-            else if (isLeave) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            if (isPink && isRed) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            else if (isExplicitLeave) cellClass += "bg-pink-500/20 text-pink-400 border border-pink-500/30 cursor-pointer";
+            else if (isZeroActivityLeave) cellClass += "bg-pink-500/10 text-pink-300 border border-pink-500/20 cursor-pointer";
             else if (isRed) cellClass += "bg-red-500/20 text-red-400 border border-red-500/30 cursor-pointer";
             else if (isToday) cellClass += "bg-primary/20 text-primary border border-primary/30 font-bold";
             else if (isSunday) cellClass += "text-muted-foreground/40";
@@ -461,7 +509,8 @@ function TeamCalendar({
 
             const tooltipParts = [
               ...names.map(n => "🏖 " + n + " (leave)"),
-              ...(isRed ? [`⚠ ${missedCount} overdue lead${missedCount! > 1 ? "s" : ""} not cleared (KPI)`] : []),
+              ...(isZeroActivityLeave && !isExplicitLeave ? ["📭 No activity recorded (auto leave)"] : []),
+              ...(isRed ? [`⚠ ${missedCount} overdue lead${missedCount! > 1 ? "s" : ""} not cleared`] : []),
             ];
 
             return (
@@ -471,14 +520,20 @@ function TeamCalendar({
                   {names.slice(0, 2).map((_, idx) => (
                     <span key={"l" + idx} className="h-1.5 w-1.5 rounded-full bg-pink-400" />
                   ))}
+                  {isZeroActivityLeave && !isExplicitLeave && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-pink-300/60" />
+                  )}
                   {isRed && <span className="h-1.5 w-1.5 rounded-full bg-red-400" />}
                   {names.length > 2 && <span className="text-[8px] text-muted-foreground">+{names.length - 2}</span>}
                 </div>
-                {(isLeave || isRed) && (
+                {(isPink || isRed) && (
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:flex flex-col bg-popover border border-border rounded-lg px-2 py-1.5 shadow-lg z-10 whitespace-nowrap text-[10px] text-foreground gap-0.5">
                     {names.map((n, idx) => (
                       <span key={"lt" + idx}>🏖 {n} <span className="text-muted-foreground">(leave)</span></span>
                     ))}
+                    {isZeroActivityLeave && !isExplicitLeave && (
+                      <span className="text-pink-300">📭 No activity (auto leave)</span>
+                    )}
                     {isRed && (
                       <span>⚠ <span className="text-red-400">{missedCount} overdue lead{missedCount! > 1 ? "s" : ""} not cleared</span></span>
                     )}
@@ -488,10 +543,14 @@ function TeamCalendar({
             );
           })}
         </div>
-        <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border/30">
+        <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-border/30">
           <div className="flex items-center gap-1.5">
             <div className="h-3 w-3 rounded-sm bg-pink-500/30 border border-pink-500/40" />
-            <span className="text-[10px] text-muted-foreground">On Leave</span>
+            <span className="text-[10px] text-muted-foreground">Leave applied</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="h-3 w-3 rounded-sm bg-pink-500/15 border border-pink-500/25" />
+            <span className="text-[10px] text-muted-foreground">No activity (auto leave)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="h-3 w-3 rounded-sm bg-red-500/30 border border-red-500/40" />
@@ -503,9 +562,6 @@ function TeamCalendar({
           </div>
           {selectedMember !== "all" && (
             <span className="text-[10px] text-muted-foreground ml-auto">Hover to see details</span>
-          )}
-          {selectedMember === "all" && (
-            <span className="text-[10px] text-muted-foreground ml-auto">Select a member to see KPI marks</span>
           )}
         </div>
       </CardContent>
@@ -527,15 +583,12 @@ export default function Leave() {
 
   const [isApplyOpen, setIsApplyOpen] = useState(false);
   const [applyForm, setApplyForm] = useState({ startDate: "", endDate: "", reason: "" });
-
   const [reviewLeave, setReviewLeave] = useState<LeaveRequest | null>(null);
   const [managerNote, setManagerNote] = useState("");
-
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const isAdminOrManager = currentUser?.role === "admin" || currentUser?.role === "manager";
 
-  // Monthly summary for current user (user role)
   const monthlyStats = useMemo(() => {
     if (!leaves || isAdminOrManager) return null;
     const now = new Date();
@@ -549,9 +602,18 @@ export default function Leave() {
     return { used, remaining: Math.max(0, 2 - used), lop: lopDays };
   }, [leaves, isAdminOrManager]);
 
-  // Preview days & LOP when applying
   const previewDays = getWorkingDays(applyForm.startDate, applyForm.endDate);
   const previewLop = monthlyStats ? Math.max(0, previewDays - monthlyStats.remaining) : 0;
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const pendingFollowUps = useMemo(() => {
+    return leads.filter(l => {
+      if (!l.followUpDate) return false;
+      const fKey = toDateKey(new Date(l.followUpDate));
+      return fKey <= today;
+    }).length;
+  }, [leads, today]);
 
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -560,18 +622,13 @@ export default function Leave() {
       return;
     }
     if (monthlyStats && monthlyStats.used >= 2) {
-      toast({
-        title: "Monthly limit reached",
-        description: "You have already used 2 leaves this month. Additional days will be Loss of Pay.",
-      });
+      toast({ title: "Monthly limit reached", description: "Additional days will be Loss of Pay." });
     }
     try {
       const result = await applyLeave.mutateAsync(applyForm);
       toast({
         title: "Leave applied successfully",
-        description: result.isLop
-          ? `${result.lopDays} day(s) will be Loss of Pay`
-          : "Within your monthly quota",
+        description: result.isLop ? `${result.lopDays} day(s) will be Loss of Pay` : "Within your monthly quota",
       });
       setIsApplyOpen(false);
       setApplyForm({ startDate: "", endDate: "", reason: "" });
@@ -602,17 +659,6 @@ export default function Leave() {
     }
   };
 
-  const today = new Date().toISOString().split("T")[0];
-
-  // Live overdue count — for warning banner only (real-time)
-  const pendingFollowUps = useMemo(() => {
-    return leads.filter(l => {
-      if (!l.followUpDate) return false;
-      const fKey = toDateKey(new Date(l.followUpDate));
-      return fKey <= today;
-    }).length;
-  }, [leads, today]);
-
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
@@ -630,18 +676,18 @@ export default function Leave() {
         )}
       </div>
 
-      {/* Overdue follow-up warning banner — live count, tells user about upcoming KPI stamp */}
+      {/* Overdue warning banner */}
       {!isAdminOrManager && pendingFollowUps > 0 && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm">
           <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
           <span className="text-red-400 font-medium">
             {pendingFollowUps} follow-up{pendingFollowUps > 1 ? "s" : ""} overdue or due today
           </span>
-          <span className="text-muted-foreground">— clear them before end of day or today will be permanently marked red on your calendar.</span>
+          <span className="text-muted-foreground">— clear them before end of day or today will be permanently marked red.</span>
         </div>
       )}
 
-      {/* Monthly quota cards — user role only */}
+      {/* Monthly quota cards */}
       {!isAdminOrManager && monthlyStats && (
         <div className="grid grid-cols-3 gap-4">
           <Card className="border-border/50">
@@ -680,14 +726,13 @@ export default function Leave() {
         </div>
       )}
 
-      {/* Team Calendar — manager/admin only */}
+      {/* Team Calendar — manager/admin */}
       {isAdminOrManager && leaves && (
         <TeamCalendar leaves={leaves} members={teamMembers} />
       )}
 
       {/* Calendar + Table layout */}
       <div className={!isAdminOrManager ? "grid grid-cols-1 lg:grid-cols-3 gap-6" : ""}>
-        {/* Calendar — user only */}
         {!isAdminOrManager && leaves && currentUser && (
           <div className="lg:col-span-1">
             <LeaveCalendar
@@ -829,18 +874,14 @@ export default function Leave() {
       <Dialog open={isApplyOpen} onOpenChange={(o) => { setIsApplyOpen(o); if (!o) setApplyForm({ startDate: "", endDate: "", reason: "" }); }}>
         <DialogContent>
           <form onSubmit={handleApply}>
-            <DialogHeader>
-              <DialogTitle>Apply for Leave</DialogTitle>
-            </DialogHeader>
+            <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
             <div className="grid gap-4 py-4">
               {monthlyStats && (
                 <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-400/5 border border-blue-400/20 text-sm">
                   <Info className="h-4 w-4 text-blue-400 mt-0.5 shrink-0" />
                   <div>
                     <span className="font-medium text-blue-400">This month: </span>
-                    <span className="text-muted-foreground">
-                      {monthlyStats.used} used · {monthlyStats.remaining} remaining · Max 2/month (Mon–Sat)
-                    </span>
+                    <span className="text-muted-foreground">{monthlyStats.used} used · {monthlyStats.remaining} remaining · Max 2/month (Mon–Sat)</span>
                   </div>
                 </div>
               )}
@@ -889,31 +930,17 @@ export default function Leave() {
         </DialogContent>
       </Dialog>
 
-      {/* Review Leave Dialog — manager/admin */}
+      {/* Review Leave Dialog */}
       <Dialog open={!!reviewLeave} onOpenChange={(o) => { if (!o) { setReviewLeave(null); setManagerNote(""); } }}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Review Leave Request</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Review Leave Request</DialogTitle></DialogHeader>
           {reviewLeave && (
             <div className="py-2 space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Employee</p>
-                  <p className="font-medium">{reviewLeave.username}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Duration</p>
-                  <p className="font-medium">{reviewLeave.days} day{reviewLeave.days > 1 ? "s" : ""}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">From</p>
-                  <p className="font-medium">{formatDate(reviewLeave.startDate)}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">To</p>
-                  <p className="font-medium">{formatDate(reviewLeave.endDate)}</p>
-                </div>
+                <div className="space-y-1"><p className="text-xs text-muted-foreground">Employee</p><p className="font-medium">{reviewLeave.username}</p></div>
+                <div className="space-y-1"><p className="text-xs text-muted-foreground">Duration</p><p className="font-medium">{reviewLeave.days} day{reviewLeave.days > 1 ? "s" : ""}</p></div>
+                <div className="space-y-1"><p className="text-xs text-muted-foreground">From</p><p className="font-medium">{formatDate(reviewLeave.startDate)}</p></div>
+                <div className="space-y-1"><p className="text-xs text-muted-foreground">To</p><p className="font-medium">{formatDate(reviewLeave.endDate)}</p></div>
               </div>
               {reviewLeave.reason && (
                 <div className="text-sm space-y-1">
@@ -930,8 +957,7 @@ export default function Leave() {
               <div className="space-y-2">
                 <Label htmlFor="manager-note">Note <span className="text-muted-foreground text-xs">(optional)</span></Label>
                 <Textarea id="manager-note" placeholder="Add a note for the employee..."
-                  className="resize-none min-h-[80px]"
-                  value={managerNote}
+                  className="resize-none min-h-[80px]" value={managerNote}
                   onChange={e => setManagerNote(e.target.value)} />
               </div>
             </div>
