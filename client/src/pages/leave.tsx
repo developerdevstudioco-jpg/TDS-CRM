@@ -888,13 +888,13 @@ export default function Leave() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label htmlFor="start-date">Start Date</Label>
-                  <Input id="start-date" type="date" min={today} required
+                  <Input id="start-date" type="date" required
                     value={applyForm.startDate}
                     onChange={e => setApplyForm({ ...applyForm, startDate: e.target.value })} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="end-date">End Date</Label>
-                  <Input id="end-date" type="date" min={applyForm.startDate || today} required
+                  <Input id="end-date" type="date" min={applyForm.startDate} required
                     value={applyForm.endDate}
                     onChange={e => setApplyForm({ ...applyForm, endDate: e.target.value })} />
                 </div>
