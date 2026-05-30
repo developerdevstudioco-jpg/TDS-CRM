@@ -21,7 +21,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search, Plus, MoreVertical, Upload, Trash2, Edit2, MessageCircle, MessageSquare, Phone,
   Loader2, FileDown, ClipboardList, StickyNote, ArrowRightLeft, Clock, Users,
-  ChevronDown, X, CalendarClock, Filter, Calendar, Send, PenLine, MessageSquareText, RotateCcw
+  ChevronDown, X, CalendarClock, Filter, Calendar, Send, PenLine, MessageSquareText, RotateCcw, Mail
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Lead } from "@shared/schema";
@@ -377,7 +377,186 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
   );
 }
 
-function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
+function EmailPickerDialog({ lead, onClose, onSent }: {
+  lead: LeadWithUser;
+  onClose: () => void;
+  onSent: (subject: string, body: string) => void;
+}) {
+  const { data: templates, isLoading } = useTemplates();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'custom' | null>(null);
+  const [customSubject, setCustomSubject] = useState('');
+  const [customBody, setCustomBody] = useState('');
+  const [previewSubject, setPreviewSubject] = useState('');
+  const [previewBody, setPreviewBody] = useState('');
+
+  // Only show email templates (type === 'email') or all if no type field
+  const emailTemplates = templates?.filter((t: any) => !t.type || t.type === 'email' || t.type === 'both') ?? [];
+
+  const handleSelectTemplate = (id: number | 'custom') => {
+    setSelectedTemplateId(id);
+    if (id === 'custom') {
+      setPreviewSubject(customSubject);
+      setPreviewBody(customBody);
+    } else {
+      const template = templates?.find((t: any) => t.id === id) as any;
+      if (template) {
+        setPreviewSubject(template.subject ? fillTemplate(template.subject, lead) : `Message from TDS-CRM for ${lead.name}`);
+        setPreviewBody(fillTemplate(template.content, lead, template.pdfUrl));
+      }
+    }
+  };
+
+  const handleSend = () => {
+    const subject = selectedTemplateId === 'custom' ? customSubject : previewSubject;
+    const body = selectedTemplateId === 'custom' ? customBody : previewBody;
+    if (!body.trim() || !lead.email) return;
+    const mailto = `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailto, '_blank');
+    onSent(subject, body);
+    onClose();
+  };
+
+  const hasEmail = !!lead.email;
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[480px] bg-card border-white/10 flex flex-col max-h-[90vh] overflow-hidden p-0">
+        <div className="px-6 pt-6 pb-4 border-b border-white/8 shrink-0">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Mail className="h-5 w-5 text-purple-400" /> Send Email
+            </DialogTitle>
+          </DialogHeader>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {/* To */}
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-white/5 rounded-xl px-4 py-2.5 border border-white/8">
+            <span className="font-medium text-foreground">To:</span>
+            <span>{lead.name}</span>
+            <span className="text-muted-foreground">·</span>
+            <span className={hasEmail ? "" : "text-red-400"}>{lead.email || "No email address"}</span>
+          </div>
+
+          {!hasEmail && (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-400/5 border border-red-400/20 text-sm text-red-400">
+              <Mail className="h-4 w-4 shrink-0" />
+              This lead has no email address. Edit the lead to add one.
+            </div>
+          )}
+
+          {/* Template list */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Choose a template</p>
+            {isLoading ? (
+              <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                <button
+                  onClick={() => handleSelectTemplate('custom')}
+                  className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
+                    selectedTemplateId === 'custom'
+                      ? 'bg-primary/10 border-primary/30 text-primary'
+                      : 'bg-white/3 border-white/8 text-foreground hover:bg-white/6 hover:border-white/15'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <PenLine className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">Custom Email</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 ml-6">Write your own subject & body</p>
+                </button>
+
+                {emailTemplates.map((template: any) => (
+                  <button
+                    key={template.id}
+                    onClick={() => handleSelectTemplate(template.id)}
+                    className={`w-full text-left px-4 py-3 rounded-xl border transition-all duration-200 ${
+                      selectedTemplateId === template.id
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-white/3 border-white/8 text-foreground hover:bg-white/6 hover:border-white/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 shrink-0 text-purple-400" />
+                      <span className="text-sm font-medium">{template.name}</span>
+                      {template.pdfUrl && (
+                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-400/10 text-red-400 border border-red-400/20">PDF</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 ml-6 line-clamp-1">{template.content}</p>
+                  </button>
+                ))}
+
+                {emailTemplates.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No email templates yet. Use Custom Email.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Subject + Body */}
+          {selectedTemplateId !== null && (
+            <div className="space-y-3">
+              {selectedTemplateId === 'custom' ? (
+                <>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Subject</p>
+                    <Input
+                      placeholder="Email subject..."
+                      value={customSubject}
+                      onChange={e => setCustomSubject(e.target.value)}
+                      className="bg-white/5 border-white/10 focus:border-primary/50 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Body</p>
+                    <Textarea
+                      placeholder="Type your email..."
+                      value={customBody}
+                      onChange={e => setCustomBody(e.target.value)}
+                      className="resize-none bg-white/5 border-white/10 focus:border-primary/50 text-sm"
+                      rows={5}
+                      autoFocus
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Subject</p>
+                    <div className="bg-white/5 border border-white/8 rounded-xl px-4 py-2.5 text-sm text-foreground">{previewSubject}</div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Preview</p>
+                    <div className="bg-white/5 border border-white/8 rounded-xl px-4 py-3 text-sm text-foreground whitespace-pre-wrap leading-relaxed">{previewBody}</div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-white/8 shrink-0 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} className="text-muted-foreground">Cancel</Button>
+          <Button
+            onClick={handleSend}
+            disabled={
+              !hasEmail ||
+              selectedTemplateId === null ||
+              (selectedTemplateId === 'custom' && !customBody.trim())
+            }
+            className="bg-purple-600 hover:bg-purple-500 text-white"
+          >
+            <Mail className="h-4 w-4 mr-2" /> Open in Mail
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
   lead: LeadWithUser; users: any[]; onClose: () => void; onLeadUpdated: () => void;
 }) {
   const { data: activities, isLoading: activitiesLoading } = useLeadActivities(lead.id);
@@ -391,6 +570,7 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
   const [newAssignedTo, setNewAssignedTo] = useState<string>(String(lead.assignedTo ?? 'none'));
   const [isUpdating, setIsUpdating] = useState(false);
   const [msgPickerType, setMsgPickerType] = useState<'whatsapp' | 'sms' | null>(null);
+  const [showEmailPicker, setShowEmailPicker] = useState(false);
 
   const handleAssigneeChange = async () => {
     const assignedToValue = newAssignedTo === 'none' ? null : Number(newAssignedTo);
@@ -455,8 +635,8 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
         </div>
       </div>
       <Separator />
-      {/* Quick Actions */}
-      <div className="py-4 grid grid-cols-3 gap-2">
+      {/* Quick Actions — 2×2 grid */}
+      <div className="py-4 grid grid-cols-2 gap-2">
         <a
           href={`tel:${lead.mobile}`}
           onClick={() => createActivity.mutate({ type: 'call', content: `Called ${lead.mobile}` })}
@@ -479,6 +659,18 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
           <MessageSquare className="h-5 w-5" />
           <span className="text-xs font-medium">SMS</span>
         </button>
+        <button
+          onClick={() => setShowEmailPicker(true)}
+          className={`flex flex-col items-center gap-1.5 py-3 rounded-xl border transition-colors ${
+            lead.email
+              ? 'bg-purple-400/10 border-purple-400/20 text-purple-400 hover:bg-purple-400/20'
+              : 'bg-white/5 border-white/10 text-muted-foreground/50 cursor-not-allowed'
+          }`}
+          title={lead.email ? `Send email to ${lead.email}` : "No email address"}
+        >
+          <Mail className="h-5 w-5" />
+          <span className="text-xs font-medium">Email</span>
+        </button>
       </div>
       {msgPickerType && (
         <MessagePickerDialog
@@ -489,6 +681,18 @@ function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
             createActivity.mutate({
               type,
               content: `${type === 'whatsapp' ? 'WhatsApp' : 'SMS'} sent to ${lead.mobile}: ${msg.substring(0, 60)}${msg.length > 60 ? '...' : ''}`
+            });
+          }}
+        />
+      )}
+      {showEmailPicker && (
+        <EmailPickerDialog
+          lead={lead}
+          onClose={() => setShowEmailPicker(false)}
+          onSent={(subject, body) => {
+            createActivity.mutate({
+              type: 'note',
+              content: `Email sent to ${lead.email} — Subject: ${subject}`
             });
           }}
         />
@@ -1165,6 +1369,13 @@ export default function Leads() {
                               <DropdownMenuItem onClick={() => { setMessageLead(lead); setMessageType('sms'); }}>
                                 <MessageSquare className="h-4 w-4 mr-2 text-blue-600" /> Send SMS
                               </DropdownMenuItem>
+                              {lead.email && (
+                                <DropdownMenuItem onClick={() => {
+                                  setDetailLead(lead);
+                                }}>
+                                  <Mail className="h-4 w-4 mr-2 text-purple-500" /> Send Email
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem onClick={() => handleDelete(lead.id)} className="text-destructive focus:text-destructive">
                                 <Trash2 className="h-4 w-4 mr-2" /> Delete
