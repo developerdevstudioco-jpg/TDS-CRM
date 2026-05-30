@@ -557,6 +557,7 @@ function EmailPickerDialog({ lead, onClose, onSent }: {
 }
 
 
+function LeadDetailPanel({ lead, users: allUsers, onClose, onLeadUpdated }: {
   lead: LeadWithUser; users: any[]; onClose: () => void; onLeadUpdated: () => void;
 }) {
   const { data: activities, isLoading: activitiesLoading } = useLeadActivities(lead.id);
