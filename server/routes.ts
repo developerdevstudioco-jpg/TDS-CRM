@@ -135,7 +135,12 @@ export async function registerRoutes(
       }
       if (currentUser.managerId) {
         const colleagues = await storage.getUsersByManager(currentUser.managerId);
-        return res.status(200).json(colleagues);
+        const manager = await storage.getUser(currentUser.managerId);
+        const all = [...colleagues];
+        if (manager && !all.find((u: any) => u.id === manager.id)) {
+          all.unshift(manager); // manager at top
+        }
+        return res.status(200).json(all);
       }
       const self = await storage.getUser(currentUser.id);
       return res.status(200).json(self ? [self] : []);
@@ -422,33 +427,6 @@ export async function registerRoutes(
       res.status(500).json({ message: err?.message || String(err) });
     }
   });
-  // ── Add this route to routes.ts (inside registerRoutes, near report routes) ──
-// GET /api/activity-days?year=2026&month=5  — returns days user had any activity
-// Optional: ?userId=X for manager/admin to check another user
-app.get('/api/activity-days', requireAuth, async (req, res) => {
-  try {
-    const currentUser = req.user as any;
-    let targetUserId = currentUser.id;
-
-    if (req.query.userId) {
-      const requestedId = Number(req.query.userId);
-      if (currentUser.role === 'user' && requestedId !== currentUser.id)
-        return res.status(403).json({ message: "Not authorized" });
-      targetUserId = requestedId;
-    }
-
-    const year  = Number(req.query.year)  || new Date().getFullYear();
-    const month = Number(req.query.month) || new Date().getMonth() + 1; // 1-indexed
-
-    const from = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const to   = new Date(year, month,     1, 0, 0, 0, 0); // first day of next month
-
-    const days = await storage.getActivityDays(targetUserId, from, to);
-    res.json(days); // ["2026-05-01", "2026-05-03", ...]
-  } catch (err: any) {
-    res.status(500).json({ message: err?.message || "Failed to fetch activity days" });
-  }
-});
 
   app.get('/api/reports/user/:id', requireAuth, async (req, res) => {
     try {
