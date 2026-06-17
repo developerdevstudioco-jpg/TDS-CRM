@@ -207,7 +207,7 @@ export async function registerRoutes(
 
   // 2. CSV upload — all authenticated users can import their own leads
 // 2. CSV upload — all authenticated users can import their own leads
-  app.post(api.leads.uploadCsv.path, requireAuth, upload.single("csv"), async (req, res) => {
+  app.post(api.leads.uploadCsv.path, requireAuth, upload.single("file"), async (req, res) => {
     try {
       const currentUser = req.user as any;
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
