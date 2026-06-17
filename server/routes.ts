@@ -21,7 +21,7 @@ const storage_disk = multer.diskStorage({
   },
 });
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 const uploadPdf = multer({
   storage: storage_disk,
   fileFilter: (req, file, cb) => {
@@ -205,11 +205,66 @@ export async function registerRoutes(
     }
   });
 
-  // 2. CSV upload
-  app.post(api.leads.uploadCsv.path, requireAdminOrManager, upload.single("csv"), async (req, res) => {
+  // 2. CSV upload — all authenticated users can import their own leads
+  app.post(api.leads.uploadCsv.path, requireAuth, upload.single("csv"), async (req, res) => {
     try {
+      const currentUser = req.user as any;
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-      res.status(200).json({ count: 0 });
+
+      // Parse CSV content
+      const csvText = req.file.buffer
+        ? req.file.buffer.toString("utf-8")
+        : require("fs").readFileSync(req.file.path, "utf-8");
+
+      const lines = csvText.split("\n").map((l: string) => l.trim()).filter(Boolean);
+      if (lines.length < 2) return res.status(400).json({ message: "CSV is empty or missing headers" });
+
+      const headers = lines[0].split(",").map((h: string) => h.trim().toLowerCase().replace(/[^a-z]/g, ""));
+      const rows = lines.slice(1);
+      let count = 0;
+
+      for (const row of rows) {
+        const cols = row.split(",").map((c: string) => c.trim().replace(/^"|"$/g, ""));
+        const get = (keys: string[]) => {
+          for (const k of keys) {
+            const idx = headers.indexOf(k);
+            if (idx !== -1 && cols[idx]) return cols[idx];
+          }
+          return null;
+        };
+
+        const mobile = get(["mobile", "phone", "contact", "mobileno", "phoneno"]);
+        const name   = get(["name", "fullname", "leadname", "customername"]);
+        if (!mobile || !name) continue; // skip rows without required fields
+
+        try {
+          const lead = await storage.createLead({
+            name,
+            mobile,
+            email:   get(["email", "emailid"]) || null,
+            company: get(["company", "organization", "companyname"]) || null,
+            status:  get(["status"]) || "Open",
+            assignedTo: currentUser.role === "user" ? currentUser.id : (Number(get(["assignedto", "assignto"])) || currentUser.id),
+            followUpDate: null,
+          });
+          await storage.createLeadActivity({
+            leadId: lead.id,
+            userId: currentUser.id,
+            type: "created",
+            content: "Lead imported via CSV",
+          });
+          count++;
+        } catch {
+          // Skip duplicate or invalid rows
+        }
+      }
+
+      // Clean up temp file if it exists
+      if (req.file.path) {
+        require("fs").unlink(req.file.path, () => {});
+      }
+
+      res.status(200).json({ count });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "Failed to upload CSV" });
     }
