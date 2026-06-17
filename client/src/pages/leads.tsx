@@ -3,7 +3,7 @@ import { useSearch } from "wouter";
 import { useLeads, useCreateLead, useUpdateLead, useDeleteLead, useUploadCsv, useBulkUpdateLeads } from "@/hooks/use-leads";
 import { useLeadActivities, useCreateLeadActivity } from "@/hooks/use-lead-activities";
 import { useUsers, useAssignableUsers } from "@/hooks/use-users";
-import { useTemplates } from "@/hooks/use-templates";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -226,7 +226,14 @@ function MessagePickerDialog({ lead, type, onClose, onSent }: {
   onClose: () => void;
   onSent: (type: 'whatsapp' | 'sms', msg: string) => void;
 }) {
-  const { data: templates, isLoading } = useTemplates();
+  const { data: templates, isLoading } = useQuery({
+    queryKey: ["/api/templates"],
+    queryFn: async () => {
+      const res = await fetch("/api/templates", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch templates");
+      return res.json();
+    },
+  });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'custom' | null>(null);
   const [customMessage, setCustomMessage] = useState('');
   const [previewMessage, setPreviewMessage] = useState('');
@@ -382,7 +389,14 @@ function EmailPickerDialog({ lead, onClose, onSent }: {
   onClose: () => void;
   onSent: (subject: string, body: string) => void;
 }) {
-  const { data: templates, isLoading } = useTemplates();
+  const { data: templates, isLoading } = useQuery({
+    queryKey: ["/api/templates"],
+    queryFn: async () => {
+      const res = await fetch("/api/templates", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch templates");
+      return res.json();
+    },
+  });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'custom' | null>(null);
   const [customSubject, setCustomSubject] = useState('');
   const [customBody, setCustomBody] = useState('');
