@@ -206,48 +206,73 @@ export async function registerRoutes(
   });
 
   // 2. CSV upload — all authenticated users can import their own leads
+// 2. CSV upload — all authenticated users can import their own leads
   app.post(api.leads.uploadCsv.path, requireAuth, upload.single("csv"), async (req, res) => {
     try {
       const currentUser = req.user as any;
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-      // Read CSV text from memory buffer (multer memoryStorage)
       const csvText = req.file.buffer.toString("utf-8");
       const lines = csvText.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
       if (lines.length < 2) return res.status(400).json({ message: "CSV is empty or missing headers" });
 
-      // Parse headers — normalise to lowercase alphanumeric
-      const headers = lines[0].split(",").map((h: string) => h.trim().toLowerCase().replace(/[^a-z]/g, ""));
+      // Auto-detect delimiter: tab or comma
+      const delimiter = lines[0].includes("\t") ? "\t" : ",";
+
+      // Normalise headers: lowercase, strip everything except a-z and digits
+      const headers = lines[0]
+        .split(delimiter)
+        .map((h: string) => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ""));
+
       const rows = lines.slice(1);
       let count = 0;
+      const errors: string[] = [];
 
-      const getCol = (cols: string[], keys: string[]) => {
+      const getCol = (cols: string[], keys: string[]): string | null => {
         for (const k of keys) {
           const idx = headers.indexOf(k);
-          if (idx !== -1 && cols[idx]?.trim()) return cols[idx].trim().replace(/^"|"$/g, "");
+          if (idx !== -1 && cols[idx]?.trim()) {
+            return cols[idx].trim().replace(/^"|"$/g, "").trim();
+          }
         }
         return null;
       };
 
-      for (const row of rows) {
-        if (!row.trim()) continue;
-        // Handle quoted commas: simple split (good enough for standard CSVs)
-        const cols = row.split(",");
+      // Strip prefixes like "p:+91", "+91", keep only digits and leading +
+      const cleanPhone = (raw: string | null): string | null => {
+        if (!raw) return null;
+        let cleaned = raw.trim().replace(/^p:/i, "").trim();
+        cleaned = cleaned.replace(/[^\d+]/g, "");
+        return cleaned || null;
+      };
 
-        const mobile = getCol(cols, ["mobile", "phone", "contact", "mobileno", "phoneno", "number"]);
-        const name   = getCol(cols, ["name", "fullname", "leadname", "customername", "firstname"]);
-        if (!mobile || !name) continue;
+      // Remove zero-width and control characters from names
+      const cleanName = (raw: string | null): string | null => {
+        if (!raw) return null;
+        return raw.replace(/[\u200B-\u200D\uFEFF\u0000-\u001F]/g, "").trim() || null;
+      };
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row.trim()) continue;
+        const cols = row.split(delimiter);
+
+        const name   = cleanName(getCol(cols, ["name", "fullname", "leadname", "customername", "firstname"]));
+        const mobile = cleanPhone(getCol(cols, ["mobile", "phone", "phonenumber", "contact", "mobileno", "phoneno", "number", "contactno", "contactnumber"]));
+
+        if (!name || !mobile) {
+          errors.push(`Row ${i + 2}: skipped — missing name or phone`);
+          continue;
+        }
 
         try {
           const lead = await storage.createLead({
             name,
             mobile,
-            email:      getCol(cols, ["email", "emailid", "mail"]) || null,
-            company:    getCol(cols, ["company", "organization", "companyname", "firm"]) || null,
-            status:     getCol(cols, ["status"]) || "Open",
-            assignedTo: currentUser.role === "user"
-              ? currentUser.id
-              : (Number(getCol(cols, ["assignedto", "assignto", "userid"])) || currentUser.id),
+            email:        getCol(cols, ["email", "emailid", "mail", "emailaddress"]) || null,
+            company:      getCol(cols, ["company", "organization", "companyname", "firm"]) || null,
+            status:       "Open",
+            assignedTo:   currentUser.id,
             followUpDate: null,
           });
           await storage.createLeadActivity({
@@ -257,12 +282,16 @@ export async function registerRoutes(
             content: "Lead imported via CSV",
           });
           count++;
-        } catch {
-          // Skip duplicate or invalid rows silently
+        } catch (rowErr: any) {
+          errors.push(`Row ${i + 2} (${name}): ${rowErr?.message || "DB error"}`);
         }
       }
 
-      res.status(200).json({ count, message: `${count} lead${count !== 1 ? "s" : ""} imported successfully` });
+      res.status(200).json({
+        count,
+        errors,
+        message: `${count} lead${count !== 1 ? "s" : ""} imported successfully${errors.length ? `, ${errors.length} rows skipped` : ""}`,
+      });
     } catch (err: any) {
       console.error("CSV upload error:", err);
       res.status(500).json({ message: err?.message || "Failed to upload CSV" });
